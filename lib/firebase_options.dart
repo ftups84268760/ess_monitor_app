@@ -68,7 +68,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyD1AVPCFmyi5AqaJN-XqHYNxX8Q-ap8dbs',
-    appId: '1:815561540879:android:168d8ed75a6c6973bd2a7a',
+    appId: '1:815561540879:android:eb0759015db9063dbd2a7a',
     messagingSenderId: '815561540879',
     projectId: 'ftups-ess-monitor-bfe4a',
     storageBucket: 'ftups-ess-monitor-bfe4a.firebasestorage.app',

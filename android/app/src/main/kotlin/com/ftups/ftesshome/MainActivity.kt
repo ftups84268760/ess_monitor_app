@@ -1,4 +1,4 @@
-package com.example.ess_monitor_app
+package com.ftups.ftesshome
 
 import io.flutter.embedding.android.FlutterActivity
 
