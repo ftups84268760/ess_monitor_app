@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "815561540879",
+    "project_id": "ftups-ess-monitor-bfe4a",
+    "storage_bucket": "ftups-ess-monitor-bfe4a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:815561540879:android:168d8ed75a6c6973bd2a7a",
+        "android_client_info": {
+          "package_name": "com.example.ess_monitor_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1AVPCFmyi5AqaJN-XqHYNxX8Q-ap8dbs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

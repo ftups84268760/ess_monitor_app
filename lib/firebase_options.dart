@@ -17,29 +17,17 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for android - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return android;
       case TargetPlatform.iOS:
         return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -59,5 +47,39 @@ class DefaultFirebaseOptions {
     projectId: 'ftups-ess-monitor-bfe4a',
     storageBucket: 'ftups-ess-monitor-bfe4a.firebasestorage.app',
     iosBundleId: 'com.ftups.ftesshome',
+  );
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyCCHSsoSR9BmEh8-3gdcwMszao4wRvjdy8',
+    appId: '1:815561540879:web:88b06034b836c52abd2a7a',
+    messagingSenderId: '815561540879',
+    projectId: 'ftups-ess-monitor-bfe4a',
+    authDomain: 'ftups-ess-monitor-bfe4a.firebaseapp.com',
+    storageBucket: 'ftups-ess-monitor-bfe4a.firebasestorage.app',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyCGqL_P6ELM1PzXDCmvkqRdgobXbK6OcSI',
+    appId: '1:815561540879:ios:5eb418459506cfa1bd2a7a',
+    messagingSenderId: '815561540879',
+    projectId: 'ftups-ess-monitor-bfe4a',
+    storageBucket: 'ftups-ess-monitor-bfe4a.firebasestorage.app',
+    iosBundleId: 'com.example.essMonitorApp',
+  );
+
+  static const FirebaseOptions android = FirebaseOptions(
+    apiKey: 'AIzaSyD1AVPCFmyi5AqaJN-XqHYNxX8Q-ap8dbs',
+    appId: '1:815561540879:android:168d8ed75a6c6973bd2a7a',
+    messagingSenderId: '815561540879',
+    projectId: 'ftups-ess-monitor-bfe4a',
+    storageBucket: 'ftups-ess-monitor-bfe4a.firebasestorage.app',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyCCHSsoSR9BmEh8-3gdcwMszao4wRvjdy8',
+    appId: '1:815561540879:web:60514c062c569e4bbd2a7a',
+    messagingSenderId: '815561540879',
+    projectId: 'ftups-ess-monitor-bfe4a',
+    authDomain: 'ftups-ess-monitor-bfe4a.firebaseapp.com',
+    storageBucket: 'ftups-ess-monitor-bfe4a.firebasestorage.app',
   );
 }
