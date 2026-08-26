@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyCGqL_P6ELM1PzXDCmvkqRdgobXbK6OcSI</string>
+	<key>GCM_SENDER_ID</key>
+	<string>815561540879</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.ftups.ftesshome</string>
+	<key>PROJECT_ID</key>
+	<string>ftups-ess-monitor-bfe4a</string>
+	<key>STORAGE_BUCKET</key>
+	<string>ftups-ess-monitor-bfe4a.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:815561540879:ios:0467c8401d70eabebd2a7a</string>
+</dict>
+</plist>
