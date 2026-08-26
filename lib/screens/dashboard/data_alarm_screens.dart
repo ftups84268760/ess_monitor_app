@@ -297,7 +297,10 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
             .order('created_at', ascending: true)
             .limit(1);
         if (earliestRes.isNotEmpty) {
-          _earliestDataDate = DateTime.parse(earliestRes.first['created_at'].toString()).toLocal();
+          String rawTime = earliestRes.first['created_at'].toString();
+          if (rawTime.length >= 19) {
+            _earliestDataDate = DateTime.parse(rawTime.substring(0, 19)); 
+          }
         }
       }
 
