@@ -7,8 +7,9 @@ class NotificationService {
 
   // 初始化原生系統推播服務
   static Future<void> init() async {
+    // 🎯 核心修正：將 '@mipmap/ic_launcher' 更改為 'ic_launcher'
     const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_launcher');
 
     const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
       requestAlertPermission: true,
@@ -21,6 +22,7 @@ class NotificationService {
       iOS: initializationSettingsIOS,
     );
 
+    // 🎯 修正：加回 settings: 標籤[cite: 3]
     await _plugin.initialize(settings: initializationSettings);
 
     if (defaultTargetPlatform == TargetPlatform.iOS) {
@@ -56,6 +58,7 @@ class NotificationService {
       ),
     );
 
+    // 🎯 修正：加回所有的具名參數標籤 (id:, title:, body:, notificationDetails:)[cite: 3]
     await _plugin.show(
       id: DateTime.now().millisecond,
       title: title,
