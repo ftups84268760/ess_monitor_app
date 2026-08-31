@@ -77,6 +77,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               children: [
                 DeviceListScreen(
                   onSelectedInverterChanged: (newName, status, dbId) {},
+                  accountType: _globalRole,
                 ),
                 ProfileScreen(
                   nickname: _globalNickname,

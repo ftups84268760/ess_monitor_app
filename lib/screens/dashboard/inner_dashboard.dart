@@ -14,6 +14,7 @@ class InnerDashboardNavigation extends StatefulWidget {
   final bool isInverterOnline;
   final String deviceDbId;
   final String inverterSn;
+  final String accountType;
 
   const InnerDashboardNavigation({
     super.key,
@@ -21,6 +22,7 @@ class InnerDashboardNavigation extends StatefulWidget {
     required this.isInverterOnline,
     required this.deviceDbId,
     required this.inverterSn,
+    required this.accountType,
   });
   @override State<InnerDashboardNavigation> createState() => _InnerDashboardNavigationState();
 }
@@ -347,6 +349,8 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
               deviceDbId: widget.deviceDbId,
               customInverterName: widget.customInverterName,
               isDeviceOnline: _isDeviceOnline, 
+              accountType: widget.accountType,
+              inverterSn: widget.inverterSn,
             ),
             SafeArea(child: AnalysisScreen(deviceDbId: widget.deviceDbId)),
             SafeArea(child: RawDataScreen(deviceDbId: widget.deviceDbId)),

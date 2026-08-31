@@ -9,13 +9,16 @@ import 'package:weather_animation/weather_animation.dart';
 import '../../core/constants.dart';
 import '../../widgets/chart_painters.dart';
 import '../settings_screens.dart';
+import 'dtu_replacement_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String timeString; // 上層傳入的時間字串(目前已用不到，但保留維持介面相容)
   final String lunarString;
   final String deviceDbId;
   final String customInverterName; 
-  final bool isDeviceOnline; 
+  final bool isDeviceOnline;
+  final String accountType; 
+  final String inverterSn;
 
   const HomeScreen({
     super.key,
@@ -23,7 +26,9 @@ class HomeScreen extends StatefulWidget {
     required this.lunarString,
     required this.deviceDbId,
     required this.customInverterName,
-    required this.isDeviceOnline, 
+    required this.isDeviceOnline,
+    required this.accountType, 
+    required this.inverterSn,
   });
 
   @override
@@ -1129,6 +1134,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                           const Divider(color: Colors.black12, height: 1),
                           const SizedBox(height: 10),
                           
+                          // 🎯 新增：只有管理員能看到這台設備的「進階維護」入口
+                          if (widget.accountType == '系統管理員' || widget.accountType == 'admin') ...[
+                          ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            tileColor: Colors.teal.withValues(alpha: 0.1), // 用一點綠色底色區分這是危險動作
+                            leading: const CircleAvatar(backgroundColor: Colors.teal, radius: 16, child: Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 16)),
+                            title: const Text('通訊模組(DTU)更換', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal)),
+                            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.teal),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => DtuReplacementScreen(
+                                  deviceDbId: widget.deviceDbId,
+                                  inverterSn: widget.inverterSn,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          ],
+
                           ListTile(
                             dense: true,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

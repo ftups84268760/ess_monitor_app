@@ -342,11 +342,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Padding(
                     padding: EdgeInsets.only(bottom: 24.0),
                     child: Text(
-                      'ESS Home',
+                      'FTESS Home',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.normal,
                         color: Colors.teal,
                         letterSpacing: 1.2,
                       ),

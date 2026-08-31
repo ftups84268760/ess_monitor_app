@@ -5,7 +5,8 @@ import 'w410s_provisioning_screen.dart';
 
 class DeviceListScreen extends StatefulWidget {
   final Function(String, bool, String) onSelectedInverterChanged;
-  const DeviceListScreen({super.key, required this.onSelectedInverterChanged});
+  final String accountType;
+  const DeviceListScreen({super.key, required this.onSelectedInverterChanged, required this.accountType});
 
   @override
   State<DeviceListScreen> createState() => _DeviceListScreenState();
@@ -65,19 +66,25 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     if (user == null) return [];
 
     try {
-      final response = await Supabase.instance.client.rpc('get_accessible_devices');
-      return (response as List).map((item) => Map<String, dynamic>.from(item as Map)).toList();
+      final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin';
+      
+      if (isAdmin) {
+        final response = await Supabase.instance.client.rpc('get_all_devices_admin');
+        return (response as List).map((item) => Map<String, dynamic>.from(item as Map)).toList();
+      } else {
+        final response = await Supabase.instance.client.rpc('get_accessible_devices');
+        return (response as List).map((item) => Map<String, dynamic>.from(item as Map)).toList();
+      }
     } catch (e) {
       debugPrint('抓取設備列表失敗: $e');
       return [];
     }
   }
 
-  // 🎯 替換：呼叫全新的授權管理面板
   void _showManageSharesModal(dynamic deviceId, String deviceName) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // 允許內容自適應並被鍵盤推高
+      isScrollControlled: true, 
       backgroundColor: Colors.transparent,
       builder: (context) => ManageSharesBottomSheet(
         deviceDbId: deviceId.toString(),
@@ -186,6 +193,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final String currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+    // 🎯 判斷是否為管理員，用於控制搜尋列提示文字與過濾邏輯
+    final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -226,7 +235,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
               onChanged: (val) { setState(() {}); },
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
-                hintText: '搜尋逆變器名稱、序號、安裝地點...',
+                // 🎯 根據身分顯示不同的搜尋提示文字
+                hintText: isAdmin ? '搜尋逆變器名稱、序號、地點或擁有者信箱...' : '搜尋逆變器名稱、序號、安裝地點...',
                 hintStyle: const TextStyle(color: Colors.black38, fontSize: 12),
                 prefixIcon: const Icon(Icons.search_rounded, color: Colors.teal, size: 20),
                 suffixIcon: _searchController.text.isNotEmpty
@@ -287,10 +297,21 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                     if (_filterMode == '已離線' && online) return false;
 
                     if (query.isEmpty) return true;
+                    
+                    // 基礎搜尋條件
                     final String name = (device['name'] ?? '').toString().toLowerCase();
                     final String sn = (device['sn'] ?? '').toString().toLowerCase();
                     final String address = (device['address'] ?? '').toString().toLowerCase();
-                    return name.contains(query) || sn.contains(query) || address.contains(query);
+                    
+                    bool isMatch = name.contains(query) || sn.contains(query) || address.contains(query);
+
+                    // 🎯 核心過濾修改：如果是管理員，額外把擁有者信箱也納入比對範圍
+                    if (isAdmin) {
+                      final String ownerEmail = (device['owner_email'] ?? '').toString().toLowerCase();
+                      isMatch = isMatch || ownerEmail.contains(query);
+                    }
+
+                    return isMatch;
                   }).toList();
 
                   displayList.sort((a, b) => _isAscending
@@ -302,7 +323,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                       children: const [
                         SizedBox(height: 100),
                         Center(
-                          child: Text('查無符合條件的儲能設備。', style: TextStyle(color: Colors.black38, fontSize: 13)),
+                          child: Text('查無符合條件的設備。', style: TextStyle(color: Colors.black38, fontSize: 13)),
                         ),
                       ],
                     );
@@ -380,7 +401,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                     Flexible(
                                       child: Text(device['name'] ?? '未命名設備', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis)
                                     ),
-                                    if (!isOwner) ...[
+                                    if (!isOwner && !isAdmin) ...[
                                       const SizedBox(width: 8),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -393,7 +414,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                               ),
                               if (isOwner) ...[
                                 IconButton(
-                                  // 🎯 替換：改為呼叫全新底板
                                   icon: const Icon(Icons.share, size: 16, color: Colors.teal),
                                   constraints: const BoxConstraints(),
                                   padding: const EdgeInsets.all(6),
@@ -413,6 +433,24 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                             children: [
                               Text('INV: ${device['sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
                               Text('DTU: ${device['dtu_sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
+                              
+                              if (isAdmin) ...[
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.person_pin_circle, size: 12, color: Colors.orange),
+                                    const SizedBox(width: 2),
+                                    Expanded(
+                                      child: Text(
+                                        '擁有者: ${device['owner_email'] ?? device['user_id'] ?? '未知'}',
+                                        style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              
                               const SizedBox(height: 4),
                               Row(
                                 children: [
@@ -444,6 +482,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                   isInverterOnline: online,
                                   deviceDbId: deviceId,
                                   inverterSn: device['sn']?.toString() ?? '未設定', 
+                                  accountType: widget.accountType,
                                 ),
                               ),
                             );
@@ -504,11 +543,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   }
 }
 
-
-// ============================================================================
-// 🎯 全新實作：設備分享管理介面 (Bottom Sheet)
-// 負責撈取清單、新增授權、刪除授權
-// ============================================================================
 class ManageSharesBottomSheet extends StatefulWidget {
   final String deviceDbId;
   final String deviceName;
@@ -531,7 +565,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
     _fetchSharedUsers();
   }
 
-  // 讀取已經分享的使用者清單
   Future<void> _fetchSharedUsers() async {
     setState(() => _isLoading = true);
     try {
@@ -551,7 +584,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
     }
   }
 
-  // 新增分享
   Future<void> _addShare() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) return;
@@ -570,9 +602,9 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
       
       if (response['success'] == true) {
         _emailController.clear();
-        FocusScope.of(context).unfocus(); // 關閉鍵盤
+        FocusScope.of(context).unfocus(); 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
-        await _fetchSharedUsers(); // 刷新清單
+        await _fetchSharedUsers(); 
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
       }
@@ -584,7 +616,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
     }
   }
 
-  // 刪除分享 (B 帳號權限回收)
   Future<void> _removeShare(String shareId, String email) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -602,7 +633,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
 
     setState(() => _isLoading = true);
     try {
-      // 透過 RLS 政策，擁有者可以直接刪除 device_shares 的紀錄
       await Supabase.instance.client.from('device_shares').delete().eq('id', shareId);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已成功收回權限'), backgroundColor: Colors.teal));
       await _fetchSharedUsers();
@@ -615,7 +645,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      // 動態高度，並在鍵盤彈出時往上推
       padding: EdgeInsets.only(
         top: 20, left: 16, right: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20
@@ -637,7 +666,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
           ),
           const SizedBox(height: 16),
           
-          // 頂部：新增分享輸入區
           Row(
             children: [
               Expanded(
@@ -679,7 +707,6 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
           const Text('已授權的帳號', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)),
           const SizedBox(height: 10),
 
-          // 底部：已授權清單 ListView
           Expanded(
             child: _isLoading
               ? const Center(child: CircularProgressIndicator(color: Colors.teal))

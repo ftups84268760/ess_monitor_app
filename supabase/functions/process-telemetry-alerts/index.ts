@@ -71,7 +71,6 @@ serve(async (req: Request) => {
           const pushTitle = "⚠️ 儲能系統連線狀態";
           const pushBody = pushMessages.join('\n');
 
-          // 🎯 新增 1：寫入歷史紀錄至 device_notifications
           await supabaseAdmin.from('device_notifications').insert({
             device_id: deviceId,
             title: pushTitle,
@@ -135,7 +134,6 @@ serve(async (req: Request) => {
           const pushTitle = newGridOff ? "⚠️ 市電停電" : "🔌 市電復電";
           const pushBody = pushMessages.join('\n');
 
-          // 🎯 新增 2：寫入歷史紀錄至 device_notifications
           await supabaseAdmin.from('device_notifications').insert({
             device_id: deviceId,
             title: pushTitle,
@@ -167,7 +165,7 @@ serve(async (req: Request) => {
         }
       }
 
-// ----------------------------------------
+      // ----------------------------------------
       // 3. 惡劣天氣備援模式切換 (檢查 is_storm_backup_mode 變化)
       // ----------------------------------------
       const oldStormMode = oldRecord?.is_storm_backup_mode;
@@ -187,7 +185,6 @@ serve(async (req: Request) => {
           hour12: false
         }).format(new Date());
 
-        // 設定推播的標題與內容
         const pushTitle = newStormMode ? "🛡️ 惡劣天氣備援模式已開啟" : "✅ 惡劣天氣備援模式已關閉";
         const pushBody = newStormMode 
           ? `已暫停時間電價(TOU)排程，並盡可能維持電池在高儲備量狀態。\n操作時間：${twTime}`
@@ -195,14 +192,12 @@ serve(async (req: Request) => {
 
         console.log(`💬 [備援模式推播] 設備 ${deviceId} 狀態改變: ${pushTitle}`);
 
-        // 🎯 寫入歷史紀錄至 device_notifications (通知中心)
         await supabaseAdmin.from('device_notifications').insert({
           device_id: deviceId,
           title: pushTitle,
           message: pushBody
         });
 
-        // 🎯 發送 FCM 手機推播
         const { data: profile } = await supabaseAdmin
           .from('profiles')
           .select('fcm_token')
@@ -300,11 +295,40 @@ serve(async (req: Request) => {
       newStates.is_battery_low = false; 
     } 
 
-    if (linePowerDir === 0 && !oldStates.is_grid_off) { 
-      newStates.is_grid_off = true; 
-    } else if (linePowerDir === 1 && oldStates.is_grid_off) { 
-      newStates.is_grid_off = false; 
-    } 
+    // ---------------------------------------------------------
+    // 🎯 核心修改區：加入市電狀態防抖動 (Debounce) 機制
+    // ---------------------------------------------------------
+    const currentTime = Date.now();
+
+    if (linePowerDir === 0) { 
+      if (!oldStates.is_grid_off) { 
+        // 尚未確立停電狀態，進入觀察期
+        if (!oldStates.grid_off_detected_at) {
+          // 第一次收到斷電訊號，記錄當下時間但不宣告停電
+          newStates.grid_off_detected_at = currentTime;
+          console.log(`⏳ 設備 ${deviceId} 疑似停電，進入 5 秒緩衝期觀察...`);
+        } else {
+          // 已經在觀察期內，計算是否超過 5 秒 (5000毫秒)
+          const duration = currentTime - oldStates.grid_off_detected_at;
+          if (duration >= 5000) {
+            newStates.is_grid_off = true; // 正式確立為停電狀態
+            newStates.grid_off_detected_at = null; // 確立後清空觀察計時器
+            console.log(`🚨 設備 ${deviceId} 確認停電，準備觸發推播機制。`);
+          }
+        }
+      } 
+    } else if (linePowerDir === 1) { 
+      // 只要收到正常的復電訊號，立刻把觀察期的計時器清空，視為硬體雜訊
+      if (oldStates.grid_off_detected_at) {
+        newStates.grid_off_detected_at = null;
+        console.log(`✅ 設備 ${deviceId} 收到正常電網訊號，判定為雜訊，清除疑似停電狀態。`);
+      }
+      // 如果原本是真的停電狀態，現在確實復電了
+      if (oldStates.is_grid_off) { 
+        newStates.is_grid_off = false; 
+      } 
+    }
+    // ---------------------------------------------------------
 
     if (totalSolar <= 0 && !oldStates.is_no_pv) { 
       newStates.is_no_pv = true; 
@@ -334,7 +358,6 @@ serve(async (req: Request) => {
         const pushTitle = "⚠️ 儲能系統運行狀態";
         const pushBody = pushMessages.join('\n');
 
-        // 🎯 新增 3：寫入歷史紀錄至 device_notifications
         await supabaseAdmin.from('device_notifications').insert({
           device_id: deviceId,
           title: pushTitle,
