@@ -6,31 +6,38 @@ class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
   // 初始化原生系統推播服務
+  // 初始化原生系統推播服務
   static Future<void> init() async {
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    try {
+      // 🎯 終極修正：加上 @mipmap/ 前綴，並使用您真實的圖示名稱 launcher_icon
+      const AndroidInitializationSettings initializationSettingsAndroid =
+          AndroidInitializationSettings('@mipmap/launcher_icon');
 
-    const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
+      const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
 
-    const InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
-    );
+      const InitializationSettings initializationSettings = InitializationSettings(
+        android: initializationSettingsAndroid,
+        iOS: initializationSettingsIOS,
+      );
 
-    await _plugin.initialize(settings: initializationSettings);
+      await _plugin.initialize(settings: initializationSettings);
 
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      final iosImplementation = _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
-      await iosImplementation?.requestPermissions(alert: true, badge: true, sound: true);
-    }
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final iosImplementation = _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+        await iosImplementation?.requestPermissions(alert: true, badge: true, sound: true);
+      }
 
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      final androidImplementation = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      await androidImplementation?.requestNotificationsPermission();
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        final androidImplementation = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+        await androidImplementation?.requestNotificationsPermission();
+      }
+    } catch (e) {
+      // 🎯 核心防護：攔截初始化錯誤，避免 APP 白畫面崩潰
+      debugPrint('⚠️ 推播服務初始化失敗 (通常是找不到 Android 圖示): $e');
     }
   }
 
@@ -56,6 +63,7 @@ class NotificationService {
       ),
     );
 
+    // 🎯 修正：加回所有的具名參數標籤 (id:, title:, body:, notificationDetails:)[cite: 3]
     await _plugin.show(
       id: DateTime.now().millisecond,
       title: title,
