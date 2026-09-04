@@ -66,7 +66,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     if (user == null) return [];
 
     try {
-      final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin';
+      final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin' || widget.accountType == '系統管理員(root)';
       
       if (isAdmin) {
         final response = await Supabase.instance.client.rpc('get_all_devices_admin');
@@ -78,6 +78,46 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     } catch (e) {
       debugPrint('抓取設備列表失敗: $e');
       return [];
+    }
+  }
+
+  // 🎯 新增：切換被分享者的推播開關
+  Future<void> _toggleSharedPushNotification(String deviceId, bool currentValue) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // 🎯 1. 將 deviceId 轉為 int，並加上 .select() 以確保有更新到資料
+      final response = await Supabase.instance.client
+          .from('device_shares')
+          .update({'allow_notifications': !currentValue})
+          .eq('device_id', int.parse(deviceId)) // 確保是整數
+          .eq('shared_to_user_id', user.id)
+          .select();
+
+      // 🎯 2. 檢查是否真的有更新到資料行
+      if (response.isEmpty) {
+        throw Exception('找不到對應的分享授權紀錄，或無權限修改');
+      }
+          
+      _reloadDeviceList();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(!currentValue ? '已開啟該設備的推播通知' : '已關閉推播通知'),
+            backgroundColor: !currentValue ? Colors.teal : Colors.black54,
+            duration: const Duration(seconds: 2),
+          )
+        );
+      }
+    } catch (e) {
+      debugPrint('切換推播失敗: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('設定失敗: $e'), backgroundColor: Colors.redAccent)
+        );
+      }
     }
   }
 
@@ -193,8 +233,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final String currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
-    // 🎯 判斷是否為管理員，用於控制搜尋列提示文字與過濾邏輯
-    final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin';
+    final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin' || widget.accountType == '系統管理員(root)';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -235,7 +274,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
               onChanged: (val) { setState(() {}); },
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
-                // 🎯 根據身分顯示不同的搜尋提示文字
                 hintText: isAdmin ? '搜尋逆變器名稱、序號、地點或擁有者信箱...' : '搜尋逆變器名稱、序號、安裝地點...',
                 hintStyle: const TextStyle(color: Colors.black38, fontSize: 12),
                 prefixIcon: const Icon(Icons.search_rounded, color: Colors.teal, size: 20),
@@ -298,14 +336,12 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
 
                     if (query.isEmpty) return true;
                     
-                    // 基礎搜尋條件
                     final String name = (device['name'] ?? '').toString().toLowerCase();
                     final String sn = (device['sn'] ?? '').toString().toLowerCase();
                     final String address = (device['address'] ?? '').toString().toLowerCase();
                     
                     bool isMatch = name.contains(query) || sn.contains(query) || address.contains(query);
 
-                    // 🎯 核心過濾修改：如果是管理員，額外把擁有者信箱也納入比對範圍
                     if (isAdmin) {
                       final String ownerEmail = (device['owner_email'] ?? '').toString().toLowerCase();
                       isMatch = isMatch || ownerEmail.contains(query);
@@ -401,7 +437,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                     Flexible(
                                       child: Text(device['name'] ?? '未命名設備', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis)
                                     ),
-                                    if (!isOwner && !isAdmin) ...[
+                                    if (!isOwner) ...[
                                       const SizedBox(width: 8),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -434,6 +470,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                               Text('INV: ${device['sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
                               Text('DTU: ${device['dtu_sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
                               
+                              // 🎯 修改：如果是管理員，且「不是」root，才顯示擁有者資訊
                               if (isAdmin) ...[
                                 const SizedBox(height: 4),
                                 Row(
@@ -472,7 +509,24 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                               ),
                             ],
                           ),
-                          trailing: const Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 14),
+                          // 🎯 加入被分享者的推播開關 UI
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!isOwner)
+                                IconButton(
+                                  icon: Icon(
+                                    (device['allow_notifications'] == true) ? Icons.notifications_active : Icons.notifications_off_outlined,
+                                    color: (device['allow_notifications'] == true) ? Colors.teal : Colors.black38,
+                                    size: 22,
+                                  ),
+                                  padding: const EdgeInsets.only(right: 8),
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () => _toggleSharedPushNotification(deviceId, device['allow_notifications'] == true),
+                                ),
+                              const Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 14),
+                            ],
+                          ),
                           onTap: () async {
                             await Navigator.push(
                               context,

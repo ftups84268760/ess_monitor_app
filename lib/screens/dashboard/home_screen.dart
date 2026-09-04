@@ -1,18 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui'; // 給 ImageFilter.blur 使用
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:weather_animation/weather_animation.dart';
-// 引入核心常數與自訂模組
 import '../../core/constants.dart';
 import '../../widgets/chart_painters.dart';
 import '../settings_screens.dart';
-import 'dtu_replacement_screen.dart';
+// import 'dtu_replacement_screen.dart'; // 因已移至進階設定，此處可選擇保留或移除
 
 class HomeScreen extends StatefulWidget {
-  final String timeString; // 上層傳入的時間字串(目前已用不到，但保留維持介面相容)
+  final String timeString; 
   final String lunarString;
   final String deviceDbId;
   final String customInverterName; 
@@ -51,11 +50,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   
   String _lastUpdateTime = '--/--/-- --:--:--';
   
-  // 🎯 儲存原始電價方案名稱與狀態
   String _rawTariffMode = '一般累進表燈(住商)';
   bool _isStormBackupMode = false;
   
-  // 🎯 儲存今日省錢明細與總額
   List<Map<String, dynamic>> _savingsData = [];
   double _todayTotalSavings = 0.0;
 
@@ -136,7 +133,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     });
   }
 
-  // 🎯 呼叫資料庫 Function 取得今日每小時收益
   Future<void> _fetchSavingsData() async {
     if (widget.deviceDbId.isEmpty) return;
     try {
@@ -147,7 +143,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           .single();
       final sn = devRes['sn'];
 
-      // 🚨 終極時區修正：直接組裝台灣當地時間字串，避免 +8 小時的時間差干擾
       final now = DateTime.now();
       final startTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T00:00:00.000";
       final endTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T23:59:59.999";
@@ -188,7 +183,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
   }
 
-  // 🎯 這是初始化資料的函式，請確認有補回 dailyRes 的查詢
   Future<void> _fetchInitialTelemetryData() async {
     try {
       if (widget.deviceDbId.isEmpty) return;
@@ -203,7 +197,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       final now = DateTime.now();
       final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
       
-      // 🚨 剛剛被誤刪的 dailyRes 查詢在這裡，已經幫您補回了
       final dailyRes = await Supabase.instance.client.from('daily_energy_stats').select().eq('device_id', sn).eq('date', dateStr).limit(1);
 
       if (mounted) {
@@ -521,7 +514,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           _rawTariffMode = tariffMode; 
           _touSettings = data['tou_settings'];
         });
-        // 🎯 方案確定後，立刻去要今日收益資料！
         _fetchSavingsData();
       }
 
@@ -627,11 +619,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     super.dispose();
   }
 
-  // 🎯 更新：包含「今日總收益」與「迷你長條圖」的電價卡片
   Widget _buildTariffCard() {
     final details = _getCurrentTariffDetails(_rawTariffMode);
     
-    // 動態配給顏色
     final Color seasonColor = details['season'] == '夏月' ? Colors.orange : Colors.blueAccent;
     Color periodColor = Colors.teal;
     if (details['period'] == '尖峰時段') {
@@ -640,12 +630,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       periodColor = Colors.orange;
     }
 
-    // 找出長條圖的最大值以計算比例
     double maxSaved = 0;
     for (var item in _savingsData) {
       if (item['saved'] > maxSaved) maxSaved = item['saved'];
     }
-    if (maxSaved == 0) maxSaved = 1; // 避免除以零
+    if (maxSaved == 0) maxSaved = 1; 
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -663,7 +652,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
           leading: const Icon(Icons.price_change_outlined, color: Colors.teal, size: 18),
           title: const Text('今日發電收益', style: TextStyle(fontSize: 12, color: Colors.black54)),
-          // 卡片未展開時，直接秀出今日總省下的錢！
           subtitle: Text(
             'NT\$ ${_todayTotalSavings.toStringAsFixed(1)}',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal)
@@ -711,7 +699,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                   ),
                   const SizedBox(height: 16),
                   
-                  // 📊 收益長條圖區塊
                   const Text('今日各時段收益 (NT\$)', style: TextStyle(fontSize: 11, color: Colors.black45, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   SizedBox(
@@ -727,14 +714,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                               final double saved = item['saved'];
                               final int hour = item['hour'];
                               
-                              // 決定柱狀圖顏色
                               Color barColor = Colors.teal.shade300;
                               if (period == '尖峰') barColor = Colors.redAccent.shade200;
                               if (period == '半尖峰') barColor = Colors.orangeAccent;
 
-                              // 計算柱狀圖高度 (最高 50)
                               double barHeight = (saved / maxSaved) * 50.0;
-                              if (barHeight < 2 && saved > 0) barHeight = 2; // 給予最小高度
+                              if (barHeight < 2 && saved > 0) barHeight = 2;
 
                               return Container(
                                 width: 28,
@@ -1134,30 +1119,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                           const Divider(color: Colors.black12, height: 1),
                           const SizedBox(height: 10),
                           
-                          // 🎯 新增：只有管理員能看到這台設備的「進階維護」入口
-                          if (widget.accountType == '系統管理員' || widget.accountType == 'admin') ...[
-                          ListTile(
-                            dense: true,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            tileColor: Colors.teal.withValues(alpha: 0.1), // 用一點綠色底色區分這是危險動作
-                            leading: const CircleAvatar(backgroundColor: Colors.teal, radius: 16, child: Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 16)),
-                            title: const Text('通訊模組(DTU)更換', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal)),
-                            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.teal),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => DtuReplacementScreen(
-                                  deviceDbId: widget.deviceDbId,
-                                  inverterSn: widget.inverterSn,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          ],
-
+                          // 🎯 移除原本外露的 DTU 與指派管理員按鈕，讓介面更簡潔
                           ListTile(
                             dense: true,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1168,7 +1130,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                             onTap: () async {
                               await Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (context) => SettingsSubMenuScreen(deviceDbId: widget.deviceDbId)),
+                                MaterialPageRoute(builder: (context) => SettingsSubMenuScreen(
+                                  deviceDbId: widget.deviceDbId,
+                                  accountType: widget.accountType,
+                                  inverterSn: widget.inverterSn, // 🎯 新增：將 SN 傳遞給設定頁面以供 DTU 更換使用
+                                )),
                               );
                               _fetchRealLocationAndWeather();
                             },

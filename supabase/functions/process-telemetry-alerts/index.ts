@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-import-prefix
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0"
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.0"
 import { initializeApp, cert } from "npm:firebase-admin@11.11.1/app"
 import { getMessaging } from "npm:firebase-admin@11.11.1/messaging"
 
@@ -15,6 +15,51 @@ if (Object.keys(firebaseConfig).length > 0) {
   }
 }
 
+// 🎯 修正：使用 SupabaseClient 型別，並在內部使用 as 進行型別斷言
+async function getBroadcastTokens(
+  supabase: SupabaseClient, 
+  deviceDbId: number | string | undefined, 
+  ownerId: string | undefined
+): Promise<string[]> {
+  
+  const tokens = new Set<string>(); 
+
+  // 1. 取得擁有者的 Token
+  if (ownerId) {
+    const { data } = await supabase.from('profiles').select('fcm_token').eq('id', ownerId).maybeSingle();
+    // 明確斷言資料結構
+    const ownerProfile = data as { fcm_token?: string } | null;
+    if (ownerProfile?.fcm_token) tokens.add(ownerProfile.fcm_token);
+  }
+
+  // 2. 取得有開啟 allow_notifications 的共享者 Token
+  if (deviceDbId) {
+    const { data } = await supabase.from('device_shares')
+      .select('shared_to_user_id')
+      .eq('device_id', deviceDbId)
+      .eq('allow_notifications', true);
+
+    // 明確斷言資料結構為陣列
+    const shares = data as { shared_to_user_id?: string }[] | null;
+
+    if (shares && shares.length > 0) {
+      // 確保陣列裡只留下字串
+      const sharedUserIds = shares.map(s => s.shared_to_user_id).filter(Boolean) as string[];
+      
+      if (sharedUserIds.length > 0) {
+        const { data: pData } = await supabase.from('profiles').select('fcm_token').in('id', sharedUserIds);
+        const sharedProfiles = pData as { fcm_token?: string }[] | null;
+        
+        sharedProfiles?.forEach(p => {
+          if (p.fcm_token) tokens.add(p.fcm_token);
+        });
+      }
+    }
+  }
+  
+  return Array.from(tokens);
+}
+
 serve(async (req: Request) => {
   try {
     const payload = await req.json();
@@ -23,6 +68,7 @@ serve(async (req: Request) => {
     const oldRecord = payload.old_record;
     const tableName = payload.table;
 
+    // 遙測表傳來的是 sn，devices 表傳來的是 id/sn
     const deviceId = record?.device_id || record?.sn; 
 
     if (!deviceId) {
@@ -40,6 +86,7 @@ serve(async (req: Request) => {
     // ==========================================
     if (tableName === 'devices') {
       let isProcessed = false;
+      const deviceDbId = record.id; // 從 devices 表觸發，一定有整數 id
 
       // ----------------------------------------
       // 1. 設備上下線強制通知 (is_online 變化)
@@ -77,24 +124,17 @@ serve(async (req: Request) => {
             message: pushBody
           });
 
-          const { data: profile } = await supabaseAdmin
-            .from('profiles')
-            .select('fcm_token')
-            .eq('id', record.user_id) 
-            .single();
-
-          if (profile?.fcm_token) {
+          // 🎯 廣播發送
+          const targetTokens = await getBroadcastTokens(supabaseAdmin, deviceDbId, record.user_id);
+          if (targetTokens.length > 0) {
             try {
-              await getMessaging().send({
-                token: profile.fcm_token,
-                notification: {
-                  title: pushTitle,
-                  body: pushBody,
-                },
+              const response = await getMessaging().sendEachForMulticast({
+                tokens: targetTokens,
+                notification: { title: pushTitle, body: pushBody },
               });
-              console.log(`✅ [推播成功] 已發送上下線強制通知給使用者: ${record.user_id}`);
+              console.log(`✅ [推播成功] 已廣播設備上下線通知給 ${response.successCount} 個裝置`);
             } catch (fcmErr) {
-              console.error('❌ [FCM 發送失敗]:', fcmErr);
+              console.error('❌ [FCM 群發失敗]:', fcmErr);
             }
           }
         }
@@ -140,28 +180,21 @@ serve(async (req: Request) => {
             message: pushBody
           });
 
-          const { data: profile } = await supabaseAdmin
-            .from('profiles')
-            .select('fcm_token')
-            .eq('id', record.user_id) 
-            .single();
-
-          if (profile?.fcm_token) {
+          // 🎯 廣播發送
+          const targetTokens = await getBroadcastTokens(supabaseAdmin, deviceDbId, record.user_id);
+          if (targetTokens.length > 0) {
             try {
-              await getMessaging().send({
-                token: profile.fcm_token,
-                notification: {
-                  title: pushTitle,
-                  body: pushBody,
-                },
+              const response = await getMessaging().sendEachForMulticast({
+                tokens: targetTokens,
+                notification: { title: pushTitle, body: pushBody },
               });
-              console.log(`✅ [推播成功] 已發送市電狀態通知給使用者`);
+              console.log(`✅ [推播成功] 已廣播市電狀態通知給 ${response.successCount} 個裝置`);
             } catch (fcmErr) {
-              console.error('❌ [FCM 發送失敗]:', fcmErr);
+              console.error('❌ [FCM 群發失敗]:', fcmErr);
             }
           }
         } else {
-          console.log(`ℹ️ [推播略過] 設備 ${deviceId} 市電狀態改變，但使用者已關閉該項通知。`);
+          console.log(`ℹ️ [推播略過] 設備 ${deviceId} 市電狀態改變，但使用者已關閉通知。`);
         }
       }
 
@@ -198,24 +231,17 @@ serve(async (req: Request) => {
           message: pushBody
         });
 
-        const { data: profile } = await supabaseAdmin
-          .from('profiles')
-          .select('fcm_token')
-          .eq('id', record.user_id) 
-          .single();
-
-        if (profile?.fcm_token) {
+        // 🎯 廣播發送
+        const targetTokens = await getBroadcastTokens(supabaseAdmin, deviceDbId, record.user_id);
+        if (targetTokens.length > 0) {
           try {
-            await getMessaging().send({
-              token: profile.fcm_token,
-              notification: {
-                title: pushTitle,
-                body: pushBody,
-              },
+            const response = await getMessaging().sendEachForMulticast({
+              tokens: targetTokens,
+              notification: { title: pushTitle, body: pushBody },
             });
-            console.log(`✅ [推播成功] 已發送惡劣天氣備援模式狀態通知`);
+            console.log(`✅ [推播成功] 已廣播備援模式通知給 ${response.successCount} 個裝置`);
           } catch (fcmErr) {
-            console.error('❌ [FCM 發送失敗]:', fcmErr);
+            console.error('❌ [FCM 群發失敗]:', fcmErr);
           }
         }
       }
@@ -302,28 +328,23 @@ serve(async (req: Request) => {
 
     if (linePowerDir === 0) { 
       if (!oldStates.is_grid_off) { 
-        // 尚未確立停電狀態，進入觀察期
         if (!oldStates.grid_off_detected_at) {
-          // 第一次收到斷電訊號，記錄當下時間但不宣告停電
           newStates.grid_off_detected_at = currentTime;
           console.log(`⏳ 設備 ${deviceId} 疑似停電，進入 5 秒緩衝期觀察...`);
         } else {
-          // 已經在觀察期內，計算是否超過 5 秒 (5000毫秒)
           const duration = currentTime - oldStates.grid_off_detected_at;
           if (duration >= 5000) {
-            newStates.is_grid_off = true; // 正式確立為停電狀態
-            newStates.grid_off_detected_at = null; // 確立後清空觀察計時器
+            newStates.is_grid_off = true; 
+            newStates.grid_off_detected_at = null; 
             console.log(`🚨 設備 ${deviceId} 確認停電，準備觸發推播機制。`);
           }
         }
       } 
     } else if (linePowerDir === 1) { 
-      // 只要收到正常的復電訊號，立刻把觀察期的計時器清空，視為硬體雜訊
       if (oldStates.grid_off_detected_at) {
         newStates.grid_off_detected_at = null;
         console.log(`✅ 設備 ${deviceId} 收到正常電網訊號，判定為雜訊，清除疑似停電狀態。`);
       }
-      // 如果原本是真的停電狀態，現在確實復電了
       if (oldStates.is_grid_off) { 
         newStates.is_grid_off = false; 
       } 
@@ -364,14 +385,19 @@ serve(async (req: Request) => {
           message: pushBody
         });
 
-        const { data: profile } = await supabaseAdmin.from('profiles').select('fcm_token').eq('id', device.user_id).single(); 
-        if (profile?.fcm_token) { 
-          try { 
-            await getMessaging().send({ token: profile.fcm_token, notification: { title: pushTitle, body: pushBody } }); 
-          } catch (fcmErr) { 
-            console.error('❌ [FCM 發送失敗]:', fcmErr);  
-          } 
-        } 
+        // 🎯 廣播發送 (傳入整數的 device.id 以便查詢 shares 表)
+        const targetTokens = await getBroadcastTokens(supabaseAdmin, device.id, device.user_id);
+        if (targetTokens.length > 0) {
+          try {
+            const response = await getMessaging().sendEachForMulticast({
+              tokens: targetTokens,
+              notification: { title: pushTitle, body: pushBody },
+            });
+            console.log(`✅ [推播成功] 已廣播遙測告警給 ${response.successCount} 個裝置`);
+          } catch (fcmErr) {
+            console.error('❌ [FCM 群發失敗]:', fcmErr);
+          }
+        }
       } 
     } 
     return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json" } }); 

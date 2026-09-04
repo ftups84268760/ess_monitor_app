@@ -24,7 +24,7 @@ class TouPeriod {
     return '^S019TOU$a,$b,$state,$start,$end\r';
   }
 
-  // 🎯 新增：轉換為 JSON 以便存入資料庫
+  // 轉換為 JSON 以便存入資料庫
   Map<String, dynamic> toJson() {
     return {
       'state': state,
@@ -33,7 +33,7 @@ class TouPeriod {
     };
   }
 
-  // 🎯 新增：從資料庫 JSON 讀取設定
+  // 從資料庫 JSON 讀取設定
   void loadFromJson(Map<String, dynamic>? json) {
     if (json == null) return;
     if (json['state'] != null) state = json['state'];
@@ -50,15 +50,20 @@ class TouPeriod {
 
 class TouSettingsScreen extends StatefulWidget {
   final String deviceDbId;
+  final bool isRootOrOwner; // 🎯 接收權限參數
 
-  const TouSettingsScreen({super.key, required this.deviceDbId});
+  const TouSettingsScreen({
+    super.key, 
+    required this.deviceDbId, 
+    required this.isRootOrOwner
+  });
 
   @override
   State<TouSettingsScreen> createState() => _TouSettingsScreenState();
 }
 
 class _TouSettingsScreenState extends State<TouSettingsScreen> {
-  bool _isLoading = true;            // 🎯 新增：初始讀取狀態
+  bool _isLoading = true;            
   bool _isSending = false;           
 
   // 季節模式與月份設定
@@ -75,7 +80,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchTouSettings(); // 🎯 頁面載入時去雲端抓資料
+    _fetchTouSettings(); 
   }
 
   // 🎯 從 Supabase 讀取現有設定
@@ -178,7 +183,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     }
 
     try {
-      // 🎯 3. 準備寫入資料庫的 JSON 結構
+      // 3. 準備寫入資料庫的 JSON 結構
       final Map<String, dynamic> newTouSettingsJson = {
         'isSeasonModeEnabled': _isSeasonModeEnabled,
         'summerStartMonth': _summerStartMonth,
@@ -192,7 +197,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
       // 取得設備 SN 並同時更新雲端設定
       final data = await Supabase.instance.client
           .from('devices')
-          .update({'tou_settings': newTouSettingsJson}) // 同步寫入資料庫
+          .update({'tou_settings': newTouSettingsJson}) 
           .eq('id', widget.deviceDbId)
           .select('sn')
           .single();
@@ -247,7 +252,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black87),
       ),
-      // 🎯 如果還在載入雲端資料，就顯示讀取圈圈
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: Colors.teal))
         : ListView(
@@ -315,7 +319,17 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
 
               const SizedBox(height: 32),
               ElevatedButton(
-                onPressed: _isSending ? null : _sendBatchCommands,
+                // 🎯 核心攔截：統一警告提示風格
+                onPressed: _isSending 
+                    ? null 
+                    : (widget.isRootOrOwner 
+                        ? _sendBatchCommands 
+                        : () {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
+                              backgroundColor: Colors.orange
+                            ));
+                          }),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.teal,
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -359,7 +373,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         children: [
           const Divider(height: 1),
           ListTile(
-            title: const Text('運行狀態 (State)', style: TextStyle(fontSize: 14)),
+            title: const Text('運行狀態(State)', style: TextStyle(fontSize: 14)),
             trailing: DropdownButton<int>(
               value: period.state,
               underline: const SizedBox(),

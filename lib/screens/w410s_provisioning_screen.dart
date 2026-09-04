@@ -115,10 +115,21 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
     );
 
     if (scannedCode != null && scannedCode.isNotEmpty) {
-      // 🎯 關鍵修改：去除字串前後空白，並自動過濾開頭的 "SN:" (不分大小寫)
       String cleanedCode = scannedCode.trim();
-      if (cleanedCode.toUpperCase().startsWith('SN:')) {
-        cleanedCode = cleanedCode.substring(3); // 截掉前3個字元 ("S", "N", ":")
+      String upperCode = cleanedCode.toUpperCase();
+      
+      // 🎯 整合新舊規則：精準擷取 "SN:" 後面的字串
+      if (upperCode.contains('SN:')) {
+        int startIndex = upperCode.indexOf('SN:') + 3; // 找到 SN: 結束的位置
+        int endIndex = upperCode.indexOf(',', startIndex); // 找看看後面有沒有逗號
+        
+        if (endIndex == -1) {
+          // 如果後面沒有逗號，代表 SN 就是字串的結尾
+          cleanedCode = cleanedCode.substring(startIndex).trim();
+        } else {
+          // 如果後面有逗號 (代表還有其他參數)，就只截取到逗號前
+          cleanedCode = cleanedCode.substring(startIndex, endIndex).trim();
+        }
       }
 
       setState(() {

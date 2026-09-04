@@ -257,7 +257,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
   
   // 🎯 替換：改用兩個整數變數，專門儲存「小時」(0~23)
   int _startHour = 0;
-  int _endHour = 23;
+  int _endHour = 24;
 
   bool _isLoadingList = true;
   List<Map<String, dynamic>> _historyLogs = [];
@@ -306,9 +306,16 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
 
       final String dateFormatted = "${_selectedDate.year}-${_twoDigits(_selectedDate.month)}-${_twoDigits(_selectedDate.day)}";
       
-      // 🎯 更新：只用小時組成搜尋字串
+      // 🎯 修正：讓結束時間「退回一小時的 59分59秒」，實現「未達 15:00」的效果
       final String timeStartStr = "${_twoDigits(_startHour)}:00:00.000";
-      final String timeEndStr = "${_twoDigits(_endHour)}:59:59.999";
+      String timeEndStr;
+      if (_endHour == 0) {
+        timeEndStr = "00:00:00.000";
+      } else if (_endHour == 24) {
+        timeEndStr = "23:59:59.999";
+      } else {
+        timeEndStr = "${_twoDigits(_endHour - 1)}:59:59.999";
+      }
 
       final String dayStart = "${dateFormatted}T$timeStartStr";
       final String dayEnd = "${dateFormatted}T$timeEndStr";
@@ -368,7 +375,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
   // 🎯 替換：重置為預設小時的函數
   void _resetTimeRange() {
     _startHour = 0;
-    _endHour = 23;
+    _endHour = 24;
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -430,6 +437,9 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
   // 🎯 新增：建立精美下拉式選單的 Helper Function
   Widget _buildHourDropdown(bool isStart) {
     int currentValue = isStart ? _startHour : _endHour;
+    // 🎯 修正：開始時間 0~23 (共 24 個選項)，結束時間 0~24 (共 25 個選項)
+    int itemCount = isStart ? 24 : 25; 
+
     return Container(
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -443,7 +453,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
           value: currentValue,
           icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Colors.teal),
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal),
-          items: List.generate(24, (index) {
+          items: List.generate(itemCount, (index) {
             return DropdownMenuItem<int>(
               value: index,
               child: Text("${_twoDigits(index)}:00"),

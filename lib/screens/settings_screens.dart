@@ -5,10 +5,61 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
 import 'tou_settings_screen.dart';
+import 'dashboard/dtu_replacement_screen.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 
-class SettingsSubMenuScreen extends StatelessWidget {
+// 🎯 更新為 StatefulWidget 進行權限管理
+class SettingsSubMenuScreen extends StatefulWidget {
   final String deviceDbId;
-  const SettingsSubMenuScreen({super.key, required this.deviceDbId});
+  final String? accountType;
+  final String? inverterSn; 
+  const SettingsSubMenuScreen({super.key, required this.deviceDbId, this.accountType, this.inverterSn});
+
+  @override
+  State<SettingsSubMenuScreen> createState() => _SettingsSubMenuScreenState();
+}
+
+class _SettingsSubMenuScreenState extends State<SettingsSubMenuScreen> {
+  bool _isLoading = true;
+  bool _hasPermission = false;
+  bool _isRootOrOwner = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUserPermission();
+  }
+
+  Future<void> _checkUserPermission() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      final data = await Supabase.instance.client
+          .from('devices')
+          .select('user_id')
+          .eq('id', widget.deviceDbId)
+          .single();
+
+      final bool isOwner = data['user_id'] == user.id;
+      final bool isRoot = widget.accountType == '系統管理員(root)';
+      final bool isAdmin = widget.accountType == 'admin' || widget.accountType == '系統管理員' || isRoot;
+
+      if (mounted) {
+        setState(() {
+          _hasPermission = isOwner || isAdmin;
+          _isRootOrOwner = isOwner || isRoot; 
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,15 +71,28 @@ class SettingsSubMenuScreen extends StatelessWidget {
         elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _buildSubMenuTile(context, Icons.tsunami_outlined, '惡劣天氣預測', WeatherForecastScreen(deviceDbId: deviceDbId)),
-          _buildSubMenuTile(context, Icons.schedule, '時間電價(TOU)排程', TouSettingsScreen(deviceDbId: deviceDbId)),
-          _buildSubMenuTile(context, Icons.hourglass_bottom_rounded, '電價方案', ElectricityTariffScreen(deviceDbId: deviceDbId)),
-          _buildSubMenuTile(context, Icons.developer_board, '設備資訊', DeviceInfoSettingsScreen(deviceDbId: deviceDbId)),
-        ],
-      ),
+      body: _isLoading 
+          ? const Center(child: CircularProgressIndicator(color: Colors.teal))
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _buildSubMenuTile(context, Icons.tsunami_outlined, '惡劣天氣預測', WeatherForecastScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                _buildSubMenuTile(context, Icons.schedule, '時間電價(TOU)排程', TouSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                _buildSubMenuTile(context, Icons.hourglass_bottom_rounded, '電價方案', ElectricityTariffScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                _buildSubMenuTile(context, Icons.developer_board, '設備資訊', DeviceInfoSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(color: Colors.black12, height: 1),
+                ),
+                _buildSubMenuTile(
+                  context, 
+                  Icons.tune_rounded, 
+                  '進階設定', 
+                  DeviceAdvancedSettingsScreen(deviceDbId: widget.deviceDbId, inverterSn: widget.inverterSn ?? '', isRootOrOwner: _isRootOrOwner)
+                ),
+              ],
+            ),
     );
   }
 
@@ -41,6 +105,15 @@ class SettingsSubMenuScreen extends StatelessWidget {
         title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
         trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
         onTap: () {
+          if (!_hasPermission) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('無此修改權限，僅設備擁有者可進入設定。'),
+              backgroundColor: Colors.redAccent,
+              duration: Duration(seconds: 2),
+            ));
+            return;
+          }
+
           if (targetScreen != null) {
             Navigator.push(context, MaterialPageRoute(builder: (context) => targetScreen));
           } else {
@@ -52,7 +125,6 @@ class SettingsSubMenuScreen extends StatelessWidget {
   }
 }
 
-// 🔔 「系統推播通知條件」設定頁面
 class PushNotificationSettingsScreen extends StatefulWidget {
   final String deviceDbId;
   const PushNotificationSettingsScreen({super.key, required this.deviceDbId});
@@ -65,7 +137,6 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
   bool _isLoading = true;
   bool _isSaving = false;
 
-  // 🎯 從資料庫讀取的細項開關狀態
   bool gridOff = true;
   bool batteryFull = true;
   bool batteryLow = true;
@@ -79,7 +150,6 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
     _fetchNotificationSettings();
   }
 
-  // 🎯 加入原本在 ProfileScreen 的全域開關更新邏輯
   Future<void> _updateMasterToggle(bool enabled) async {
     setState(() {
       GlobalState.isPushNotificationEnabled = enabled;
@@ -267,7 +337,8 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
 
 class ElectricityTariffScreen extends StatefulWidget {
   final String deviceDbId;
-  const ElectricityTariffScreen({super.key, required this.deviceDbId});
+  final bool isRootOrOwner; 
+  const ElectricityTariffScreen({super.key, required this.deviceDbId, required this.isRootOrOwner});
 
   @override
   State<ElectricityTariffScreen> createState() => _ElectricityTariffScreenState();
@@ -474,49 +545,36 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
                   const Text('請選擇您的台電電價計費模式：', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
 
-                  SizedBox(
-                    height: 350, // 🎯 步驟 1：稍微拉高容器，讓標準尺寸的卡片能完美呈現
-                    child: ListView.builder(
-                      itemCount: _tariffOptions.length,
-                      itemBuilder: (context, index) {
-                        final option = _tariffOptions[index];
-                        final bool isSelected = option == _selectedTariff;
-
-                        return Card(
-                          elevation: 1, // 🎯 步驟 2-1：統一為系統選單的扁平陰影
-                          margin: const EdgeInsets.only(bottom: 10), // 🎯 步驟 2-2：統一卡片間距
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12), // 🎯 統一圓角
-                          ),
-                          child: ListTile(
-                            // 🎯 步驟 2-3：補上與系統設定一樣的左側 leading Icon
-                            leading: Icon(
-                              Icons.price_change_outlined, 
-                              color: isSelected ? Colors.teal : Colors.black38
-                            ),
-                            title: Text(
-                              option,
-                              style: TextStyle(
-                                fontSize: 14, // 🎯 步驟 2-4：統一字體大小為 14
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, // 🎯 統一字重
-                                color: isSelected ? Colors.teal.shade800 : Colors.black87,
-                              ),
-                            ),
-                            trailing: isSelected
-                                ? const Icon(Icons.check_circle, color: Colors.teal, size: 20)
-                                : const Icon(Icons.radio_button_unchecked, color: Colors.black26, size: 18),
-                            onTap: () {
-                              setState(() {
-                                _selectedTariff = option;
-                              });
-                            },
-                          ),
-                        );
-                      },
+                  DropdownButtonFormField<String>(
+                    initialValue: _selectedTariff,
+                    decoration: InputDecoration(
+                      labelText: '選擇電價方案',
+                      labelStyle: const TextStyle(color: Colors.teal),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8), 
+                        borderSide: const BorderSide(color: Colors.teal, width: 2)
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      prefixIcon: const Icon(Icons.price_change_outlined, color: Colors.teal),
                     ),
+                    items: _tariffOptions.map((option) {
+                      return DropdownMenuItem<String>(
+                        value: option,
+                        child: Text(option, style: const TextStyle(fontSize: 14)),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _selectedTariff = val;
+                        });
+                      }
+                    },
                   ),
 
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 16),
 
                   Expanded(
                     child: SingleChildScrollView(
@@ -532,7 +590,16 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: _isSaving ? null : _saveTariffToSupabase,
+                    onPressed: _isSaving 
+                        ? null 
+                        : (widget.isRootOrOwner 
+                            ? _saveTariffToSupabase 
+                            : () {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                  content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
+                                  backgroundColor: Colors.orange
+                                ));
+                              }),
                     child: Text(_isSaving ? '儲存中...' : '儲存設定', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
                 ],
@@ -544,7 +611,8 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
 
 class WeatherForecastScreen extends StatefulWidget {
   final String deviceDbId;
-  const WeatherForecastScreen({super.key, required this.deviceDbId});
+  final bool isRootOrOwner; 
+  const WeatherForecastScreen({super.key, required this.deviceDbId, required this.isRootOrOwner});
 
   @override
   State<WeatherForecastScreen> createState() => _WeatherForecastScreenState();
@@ -554,7 +622,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
   bool _isLoadingWeather = true;
   String _currentAddress = '讀取中...';
   List<Map<String, String>> _forecastList = [];
-  bool _isStormBackupMode = false; // 🎯 新增：狀態變數
+  bool _isStormBackupMode = false; 
 
   @override
   void initState() {
@@ -583,12 +651,10 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
     }
   }
 
-  // 🎯 新增：手動啟用惡劣天氣備援指令
   Future<void> _enableStormBackupMode() async {
     if (widget.deviceDbId.isEmpty) return;
 
     try {
-      // 1. 從資料庫取得設備的 SN 序號
       final data = await Supabase.instance.client
           .from('devices')
           .select('sn')
@@ -596,14 +662,12 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
           .single();
       final String sn = data['sn'];
 
-      // 2. 準備要下發的「強制滿充備援」指令陣列
       List<String> commandsToDeploy = [
         '^S011DST0,06,09\r',
         '^S019TOU0,0,1,0000,0000\r',
         '^S019TOU0,1,1,0000,0000\r'
       ];
 
-      // 3. 呼叫 Edge Function 執行遠端下發
       final response = await Supabase.instance.client.functions.invoke(
         'send-device-command',
         body: {
@@ -616,7 +680,6 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
         throw Exception('雲端派發給設備失敗');
       }
 
-      // 4. 指令發送成功後，更新資料庫的 UI 顯示狀態
       await Supabase.instance.client
           .from('devices')
           .update({'is_storm_backup_mode': true})
@@ -659,13 +722,12 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
 
       final data = await Supabase.instance.client
           .from('devices')
-          .select('address, is_storm_backup_mode') // 🎯 修改：同時抓取 is_storm_backup_mode 狀態
+          .select('address, is_storm_backup_mode') 
           .eq('id', widget.deviceDbId)
           .single();
 
       final String rawAddr = (data['address'] ?? '').toString().trim();
       
-      // 🎯 更新狀態變數
       _isStormBackupMode = data['is_storm_backup_mode'] ?? false;
 
       if (rawAddr.isEmpty || rawAddr == '尚未設定' || rawAddr == '未設定安裝地址') {
@@ -820,7 +882,6 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
             
             const SizedBox(height: 16),
 
-            // 🚨 新增：醒目的紅色手動觸發按鈕
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -830,7 +891,16 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   elevation: _isStormBackupMode ? 0 : 2,
                 ),
-                onPressed: _isStormBackupMode ? null : _enableStormBackupMode,
+                onPressed: _isStormBackupMode 
+                    ? null 
+                    : (widget.isRootOrOwner 
+                        ? _enableStormBackupMode 
+                        : () {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
+                              backgroundColor: Colors.orange
+                            ));
+                          }),
                 child: Text(
                   _isStormBackupMode ? '「惡劣天氣備援模式」執行中' : '立即啟用「惡劣天氣備援模式」', 
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)
@@ -893,7 +963,8 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
 
 class DeviceInfoSettingsScreen extends StatefulWidget {
   final String deviceDbId;
-  const DeviceInfoSettingsScreen({super.key, required this.deviceDbId});
+  final bool isRootOrOwner; 
+  const DeviceInfoSettingsScreen({super.key, required this.deviceDbId, required this.isRootOrOwner});
 
   @override
   State<DeviceInfoSettingsScreen> createState() => _DeviceInfoSettingsScreenState();
@@ -910,7 +981,7 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
     '桃園市': ['桃園區', '中壢區', '大溪區', '楊梅區', '蘆竹區', '大園區', '龜山區', '八德區', '龍潭區', '平鎮區', '新屋區', '觀音區', '複興區'],
     '新竹市': ['東區', '北區', '香山區'],
     '新竹縣': ['竹北市', '竹東鎮', '新埔鎮', '關西鎮', '湖口鄉', '新豐鄉', '峨眉鄉', '寶山鄉', '北埔鄉', '芎林鄉', '橫山鄉', '尖石鄉', '五峰鄉'],
-    '苗栗縣': ['苗栗市', '頭份市', '竹南鎮', '苑裡鎮', '通霄鎮', '後龍鎮', '卓蘭鎮', '大湖鄉', '公館鄉', '銅鑼鄉', '南庄鄉', '頭屋鄉', '三義鄉', '西湖鄉', '造橋鄉', '三灣鄉', '獅潭鄉', '泰安鄉'],
+    '苗栗縣': ['苗栗市', '頭份市', '竹南鎮', '苑裡鎮', '通霄鎮', '後龍鎮', '卓蘭鎮', '大湖鄉', '公館鄉', '銅鑼鄉', '南庄鄉', '頭屋鄉', '三義鄉', '西湖鄉', '造橋鄉', '三灣鄉', '狮潭鄉', '泰安鄉'],
     '台中市': ['中區', '東區', '南區', '西區', '北區', '北屯區', '西屯區', '南屯區', '太平區', '大里區', '霧峰區', '烏日區', '豐原區', '后里區', '石岡區', '東勢區', '和平區', '新社區', '潭子區', '大雅區', '神岡區', '大肚區', '沙鹿區', '龍井區', '梧棲區', '清水區', '大甲區', '外埔區', '大安區'],
     '彰化縣': ['彰化市', '員林市', '鹿港鎮', '和美鎮', '北斗鎮', '溪湖鎮', '田中鎮', '二林鎮', '線西鄉', '伸港鄉', '福興鄉', '秀水鄉', '花壇鄉', '芬園鄉', '大村鄉', '埔鹽鄉', '埔心鄉', '永靖鄉', '社頭鄉', '二水鄉', '田尾鄉', '埤頭鄉', '芳苑鄉', '大城鄉', '竹塘鄉', '溪州鄉'],
     '南投縣': ['南投市', '埔里鎮', '草屯鎮', '竹山鎮', '集集鎮', '名間鄉', '鹿谷鄉', '中寮鄉', '魚池鄉', '國姓鄉', '水里鄉', '信義鄉', '仁愛鄉'],
@@ -1076,11 +1147,673 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
 
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14)),
-              onPressed: _isSaving ? null : _saveDeviceSpecsToSupabase,
+              onPressed: _isSaving 
+                  ? null 
+                  : (widget.isRootOrOwner 
+                      ? _saveDeviceSpecsToSupabase 
+                      : () {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
+                            backgroundColor: Colors.orange
+                          ));
+                        }),
               child: Text(_isSaving ? '儲存中...' : '儲存設定', style: const TextStyle(color: Colors.white)),
             )
           ],
         ),
+      ),
+    );
+  }
+}
+
+class AdminPromotionScreen extends StatefulWidget {
+  const AdminPromotionScreen({super.key});
+
+  @override
+  State<AdminPromotionScreen> createState() => _AdminPromotionScreenState();
+}
+
+class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
+  final TextEditingController _emailController = TextEditingController();
+  bool _isProcessing = false;
+
+  Future<void> _changeAdminRole(bool makeAdmin) async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請輸入欲設定的帳號信箱')));
+      return;
+    }
+
+    if (!makeAdmin) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('撤銷權限確認', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text('確定要將 $email 降級為一般使用者嗎？\n對方將立即失去全系統設備的檢視與操作權限。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('確定撤銷', style: TextStyle(color: Colors.red))),
+          ],
+        )
+      );
+      if (confirm != true) return;
+    }
+
+    setState(() => _isProcessing = true);
+
+    try {
+      final rpcName = makeAdmin ? 'promote_to_admin_by_email' : 'demote_from_admin_by_email';
+      final response = await Supabase.instance.client.rpc(
+        rpcName,
+        params: {'target_email': email},
+      );
+
+      if (!mounted) return;
+
+      if (response['success'] == true) {
+        _emailController.clear();
+        FocusScope.of(context).unfocus(); 
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統連線異常，請稍後再試'), backgroundColor: Colors.redAccent));
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text('管理員權限設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.withValues(alpha: 0.3))),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.admin_panel_settings_rounded, color: Colors.redAccent, size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text('升級為管理員後，該帳號將獲得最高權限。若撤銷權限，該帳號將恢復為僅能檢視自己設備的一般使用者。', style: TextStyle(fontSize: 12, color: Colors.redAccent, height: 1.5, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text('輸入欲設定的帳號 Email：', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                hintText: 'example@email.com',
+                prefixIcon: const Icon(Icons.email_outlined, color: Colors.teal),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.teal, width: 2)),
+                filled: true,
+                fillColor: const Color(0xFFF9F9F9),
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal, 
+                      padding: const EdgeInsets.symmetric(vertical: 14), 
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                    ),
+                    onPressed: _isProcessing ? null : () => _changeAdminRole(true),
+                    child: _isProcessing 
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('指派為管理員', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.redAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 14), 
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(color: _isProcessing ? Colors.grey : Colors.redAccent)
+                      )
+                    ),
+                    onPressed: _isProcessing ? null : () => _changeAdminRole(false),
+                    child: const Text('撤銷管理員', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DeviceAdvancedSettingsScreen extends StatelessWidget {
+  final String deviceDbId;
+  final String inverterSn;
+  final bool isRootOrOwner; 
+
+  const DeviceAdvancedSettingsScreen({
+    super.key, 
+    required this.deviceDbId, 
+    required this.inverterSn, 
+    required this.isRootOrOwner
+  });
+
+  void _promptDtuPassword(BuildContext context) {
+    final TextEditingController pwdController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('需要密碼授權', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: pwdController,
+          obscureText: true,
+          decoration: const InputDecoration(
+            hintText: '請輸入通訊模組更換密碼',
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.teal)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+          TextButton(
+            onPressed: () {
+              if (pwdController.text == 'ftups84268760') {
+                Navigator.pop(context); 
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (context) => DtuReplacementScreen(deviceDbId: deviceDbId, inverterSn: inverterSn)
+                ));
+              } else {
+                Navigator.pop(context); 
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('授權密碼錯誤，拒絕存取！'), backgroundColor: Colors.redAccent));
+              }
+            },
+            child: const Text('確認執行', style: TextStyle(color: Colors.teal)),
+          )
+        ]
+      )
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9F9F9),
+      appBar: AppBar(
+        title: const Text('進階設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            elevation: 1,
+            margin: const EdgeInsets.only(bottom: 10),
+            child: ListTile(
+              leading: const Icon(Icons.battery_charging_full_rounded, color: Colors.teal),
+              title: const Text('電池參數設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
+              onTap: () {
+                if (!isRootOrOwner) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('權限不足：僅擁有者或系統管理員(root)可進入電池參數設定。'),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 2),
+                  ));
+                  return;
+                }
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (context) => BatteryParameterSettingsScreen(deviceDbId: deviceDbId, inverterSn: inverterSn)
+                ));
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+          Card(
+            elevation: 1,
+            margin: const EdgeInsets.only(bottom: 10),
+            child: ListTile(
+              leading: const Icon(Icons.swap_horiz_rounded, color: Colors.redAccent),
+              title: const Text('通訊模組(DTU)更換', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
+              onTap: () => _promptDtuPassword(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SystemAdvancedSettingsScreen extends StatelessWidget {
+  const SystemAdvancedSettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9F9F9),
+      appBar: AppBar(
+        title: const Text('系統進階設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            elevation: 1,
+            margin: const EdgeInsets.only(bottom: 10),
+            child: ListTile(
+              leading: const Icon(Icons.admin_panel_settings, color: Colors.teal),
+              title: const Text('管理員權限設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              subtitle: const Text('指派或撤銷系統管理員身分', style: TextStyle(fontSize: 12, color: Colors.black45)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const AdminPromotionScreen()));
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class BatteryParameterSettingsScreen extends StatefulWidget {
+  final String deviceDbId;
+  final String inverterSn;
+  const BatteryParameterSettingsScreen({super.key, required this.deviceDbId, required this.inverterSn});
+
+  @override
+  State<BatteryParameterSettingsScreen> createState() => _BatteryParameterSettingsScreenState();
+}
+
+class _BatteryParameterSettingsScreenState extends State<BatteryParameterSettingsScreen> {
+  bool _isLoading = false;
+  MqttServerClient? _mqttClient;
+  
+  int _maxAcChargeCurrent = 10;  
+  int _offGridDischargeSoc = 20; 
+  int _offGridRecoverySoc = 30;  
+  int _onGridDischargeSoc = 30;  
+  int _onGridRecoverySoc = 40;   
+
+  @override
+  void initState() {
+    super.initState();
+    _setupDirectMqtt();
+  }
+
+  @override
+  void dispose() {
+    _mqttClient?.disconnect(); 
+    super.dispose();
+  }
+
+  Future<void> _setupDirectMqtt() async {
+    final clientId = 'flutter_app_${DateTime.now().millisecondsSinceEpoch}';
+    _mqttClient = MqttServerClient.withPort('vb6a817a.ala.eu-central-1.emqxsl.com', clientId, 8883);
+    _mqttClient!.secure = true;
+    _mqttClient!.logging(on: false);
+    
+    final connMessage = MqttConnectMessage()
+        .authenticateAs('FTESS', '84268760') 
+        .withClientIdentifier(clientId)
+        .startClean();
+    _mqttClient!.connectionMessage = connMessage;
+
+    try {
+      await _mqttClient!.connect();
+      if (_mqttClient!.connectionStatus!.state == MqttConnectionState.connected) {
+        debugPrint('✅ MQTT 直連成功，準備攔截逆變器回傳資料');
+        
+        _mqttClient!.subscribe('inverter/telemetry/${widget.inverterSn}', MqttQos.atMostOnce);
+        
+        _mqttClient!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
+          final recMess = c![0].payload as MqttPublishMessage;
+          final payloadString = String.fromCharCodes(recMess.payload.message);
+          
+          if (payloadString.contains('^D092')) {
+            final startIndex = payloadString.indexOf('^D092');
+            final cleanString = payloadString.substring(startIndex);
+            // ignore: unused_element
+            _parseBatsResponse(cleanString);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ MQTT 連線失敗: $e');
+      _mqttClient?.disconnect();
+    }
+  }
+
+  List<int> _generateList(int start, int end, int step) {
+    List<int> list = [];
+    for (int i = start; i <= end; i += step) {
+      list.add(i);
+    }
+    return list;
+  }
+
+  Future<void> _queryDeviceSettings() async {
+    setState(() => _isLoading = true);
+    try {
+      await Supabase.instance.client.functions.invoke(
+        'send-device-command',
+        body: {'sn': widget.inverterSn, 'commands': ['^P005BATS\r']},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('讀取中...'), backgroundColor: Colors.teal, duration: Duration(seconds: 2))
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('讀取失敗'), backgroundColor: Colors.redAccent));
+    } finally {
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _isLoading) setState(() => _isLoading = false);
+      });
+    }
+  }
+
+  void _parseBatsResponse(String cleanString) {
+    try {
+      List<String> parts = cleanString.split(',');
+      if (parts.length >= 22) {
+        int vvvv = int.parse(parts[16]);
+        int xxx = int.parse(parts[18]);
+        int yyy = int.parse(parts[19]);
+        int zzz = int.parse(parts[20]);
+        int aaa = int.parse(RegExp(r'^\d+').firstMatch(parts[21])?.group(0) ?? '0');
+
+        setState(() {
+          _maxAcChargeCurrent = (vvvv ~/ 10).clamp(10, 100);
+          _offGridDischargeSoc = xxx.clamp(0, 80);
+          _offGridRecoverySoc = yyy.clamp(0, 80);
+          _onGridDischargeSoc = zzz.clamp(5, 95);
+          _onGridRecoverySoc = aaa.clamp(5, 100);
+          _isLoading = false; 
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('參數已成功讀取'), backgroundColor: Colors.teal)
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('解析失敗: $e');
+    }
+  }
+
+  Future<void> _sendAcChargeCurrent() async {
+    setState(() => _isLoading = true);
+    try {
+      String currentStr = (_maxAcChargeCurrent * 10).toString().padLeft(4, '0');
+      await Supabase.instance.client.functions.invoke(
+        'send-device-command',
+        body: {'sn': widget.inverterSn, 'commands': ['^S011MUCHGC$currentStr\r']},
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('充電電流設定已發送'), backgroundColor: Colors.teal));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定失敗'), backgroundColor: Colors.redAccent));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _sendSocSettings() async {
+    setState(() => _isLoading = true);
+    try {
+      String aaaStr = _offGridDischargeSoc.toString().padLeft(3, '0');
+      String bbbStr = _offGridRecoverySoc.toString().padLeft(3, '0');
+      String cccStr = _onGridDischargeSoc.toString().padLeft(3, '0');
+      String dddStr = _onGridRecoverySoc.toString().padLeft(3, '0');
+      String cmd = '^S021BATDS$aaaStr,$bbbStr,$cccStr,$dddStr\r';
+
+      await Supabase.instance.client.functions.invoke(
+        'send-device-command',
+        body: {'sn': widget.inverterSn, 'commands': [cmd]},
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SOC設定已發送'), backgroundColor: Colors.teal));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定失敗'), backgroundColor: Colors.redAccent));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Widget _buildSendButton({required String label, required VoidCallback onPressed, required Color color}) {
+    return SizedBox(
+      height: 48, 
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        onPressed: onPressed,
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+      ),
+    );
+  }
+
+  Widget _buildControlRow({
+    required String title,
+    required int value,
+    required List<int> options,
+    required String unit,
+    required Function(int?) onChanged,
+    Widget? trailingAction,
+  }) {
+    final safeValue = options.contains(value) ? value : options.first;
+    
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 48,
+                  child: DropdownButtonFormField<int>(
+                    initialValue: safeValue,
+                    icon: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      filled: true,
+                      fillColor: const Color(0xFFF5F5F5),
+                    ),
+                    items: options.map((opt) => DropdownMenuItem(value: opt, child: Text('$opt $unit', style: const TextStyle(fontSize: 15, color: Colors.black87)))).toList(),
+                    onChanged: onChanged,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (trailingAction != null) ...[
+            const SizedBox(width: 12),
+            trailingAction,
+          ]
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9F9F9),
+      appBar: AppBar(
+        title: const Text('電池參數', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+      ),
+      body: Stack(
+        children: [
+          ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.teal,
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.teal, width: 1.5),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: const Icon(Icons.cloud_download_rounded, size: 20),
+                  label: const Text('讀取電池設定參數', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  onPressed: _queryDeviceSettings,
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.grey.shade200, width: 1),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('充電設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const Divider(color: Colors.black12, height: 24),
+                      _buildControlRow(
+                        title: '最大市電充電電流',
+                        value: _maxAcChargeCurrent,
+                        options: _generateList(10, 100, 10),
+                        unit: 'A',
+                        onChanged: (v) => setState(() => _maxAcChargeCurrent = v!),
+                        trailingAction: _buildSendButton(
+                          label: '設定', 
+                          color: Colors.green, 
+                          onPressed: _sendAcChargeCurrent
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.grey.shade200, width: 1),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('SOC相關設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const Divider(color: Colors.black12, height: 24),
+                      
+                      const Text('無市電(Off-Grid)狀態', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)), 
+                      const SizedBox(height: 12),
+                      _buildControlRow(
+                        title: '電池截止放電SOC',
+                        value: _offGridDischargeSoc,
+                        options: _generateList(0, 80, 5),
+                        unit: '%',
+                        onChanged: (v) => setState(() => _offGridDischargeSoc = v!),
+                      ),
+                      _buildControlRow(
+                        title: '電池重新放電SOC',
+                        value: _offGridRecoverySoc,
+                        options: _generateList(0, 80, 5),
+                        unit: '%',
+                        onChanged: (v) => setState(() => _offGridRecoverySoc = v!),
+                      ),
+
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 16.0),
+                        child: Divider(color: Colors.black12),
+                      ),
+
+                      const Text('有市電(On-Grid)狀態', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)), 
+                      const SizedBox(height: 12),
+                      _buildControlRow(
+                        title: '電池截止放電SOC',
+                        value: _onGridDischargeSoc,
+                        options: _generateList(5, 95, 5),
+                        unit: '%',
+                        onChanged: (v) => setState(() => _onGridDischargeSoc = v!),
+                      ),
+                      _buildControlRow(
+                        title: '電池重新放電SOC',
+                        value: _onGridRecoverySoc,
+                        options: _generateList(5, 100, 5),
+                        unit: '%',
+                        onChanged: (v) => setState(() => _onGridRecoverySoc = v!),
+                      ),
+
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _buildSendButton(
+                          label: '設定', 
+                          color: Colors.blueAccent, 
+                          onPressed: _sendSocSettings
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 40),
+            ],
+          ),
+          if (_isLoading)
+            Container(
+              color: Colors.white.withValues(alpha: 0.6),
+              child: const Center(child: CircularProgressIndicator(color: Colors.teal)),
+            )
+        ],
       ),
     );
   }

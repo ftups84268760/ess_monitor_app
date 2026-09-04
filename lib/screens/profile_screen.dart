@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'settings_screens.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String nickname;
@@ -278,12 +279,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey[100]!)),
                   child: Column(
                     children: [
-                      ListTile(
-                        leading: const Icon(Icons.manage_accounts, color: Colors.black45),
-                        title: const Text('帳號類型', style: TextStyle(color: Colors.black87, fontSize: 13)),
-                        trailing: Text(widget.accountType, style: const TextStyle(color: Colors.black45, fontSize: 12)),
-                      ),
-                      const Divider(color: Colors.black12, height: 1),
+                      // 🎯 新增：只有 root 管理員才看得到的系統級進階設定
+                      if (widget.accountType == '系統管理員(root)') ...[
+                        ListTile(
+                          leading: const Icon(Icons.admin_panel_settings, color: Colors.redAccent),
+                          title: const Text('進階設定(root權限專用)', style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+                          trailing: const Icon(Icons.chevron_right, color: Colors.black26),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => const SystemAdvancedSettingsScreen()),
+                            );
+                          },
+                        ),
+                        const Divider(color: Colors.black12, height: 1),
+                      ],
                       ListTile(
                         leading: const Icon(Icons.lock_reset_rounded, color: Colors.black45),
                         title: const Text('修改密碼', style: TextStyle(color: Colors.black87, fontSize: 13)),
@@ -573,8 +583,39 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   }
 }
 
-class SoftwareInfoScreen extends StatelessWidget {
+class SoftwareInfoScreen extends StatefulWidget {
   const SoftwareInfoScreen({super.key});
+
+  @override
+  State<SoftwareInfoScreen> createState() => _SoftwareInfoScreenState();
+}
+
+class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
+  String _version = '讀取中...'; // 🎯 新增變數來儲存版本號
+
+  @override
+  void initState() {
+    super.initState();
+    _initPackageInfo(); // 🎯 畫面初始化時讀取版本號
+  }
+
+  // 🎯 核心功能：非同步讀取 pubspec.yaml 的版本資訊
+  Future<void> _initPackageInfo() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      setState(() {
+        // 如果 pubspec.yaml 寫的是 1.0.0+5
+        // info.version 會取得 "1.0.0"
+        // info.buildNumber 會取得 "5"
+        // 您可以依照喜好組合，這裡示範組合在一起
+        _version = '${info.version} (Build ${info.buildNumber})'; 
+      });
+    } catch (e) {
+      setState(() {
+        _version = '版本讀取失敗';
+      });
+    }
+  }
 
   Future<String> _loadPrivacyPolicy() async {
     try {
@@ -605,7 +646,7 @@ class SoftwareInfoScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 30),
             child: Column(
               children: [
-Container(
+                Container(
                   width: 72,
                   height: 72,
                   decoration: BoxDecoration(
@@ -629,7 +670,8 @@ Container(
                 const SizedBox(height: 16),
                 const Text('FTESS Home', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 6),
-                const Text('Version 1.0.0', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                // 🎯 替換：原本寫死的文字，改為顯示動態讀取到的 _version 變數
+                Text('Version $_version', style: const TextStyle(fontSize: 13, color: Colors.black54)),
               ],
             ),
           ),

@@ -58,6 +58,7 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
   }
 
   // 🎯 呼叫相機掃描 QR Code
+  // 🎯 呼叫相機掃描 QR Code
   Future<void> _scanQRCode() async {
     final String? scannedCode = await Navigator.push(
       context,
@@ -66,9 +67,20 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
 
     if (scannedCode != null && scannedCode.isNotEmpty) {
       String cleanedCode = scannedCode.trim();
-      if (cleanedCode.toUpperCase().startsWith('SN:')) {
-        cleanedCode = cleanedCode.substring(3);
+      String upperCode = cleanedCode.toUpperCase();
+      
+      // 🎯 整合新舊規則：精準擷取 "SN:" 後面的字串
+      if (upperCode.contains('SN:')) {
+        int startIndex = upperCode.indexOf('SN:') + 3; // 找到 SN: 結束的位置
+        int endIndex = upperCode.indexOf(',', startIndex); // 找看看後面有沒有逗號
+        
+        if (endIndex == -1) {
+          cleanedCode = cleanedCode.substring(startIndex).trim();
+        } else {
+          cleanedCode = cleanedCode.substring(startIndex, endIndex).trim();
+        }
       }
+      
       setState(() {
         _newDtuSnController.text = cleanedCode;
       });

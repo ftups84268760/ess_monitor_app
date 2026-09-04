@@ -30,10 +30,11 @@ serve(async (_req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // 1. 撈取有開啟「惡劣天氣備援」且擁有 FCM Token 的使用者設備
+    // 1. 撈取有開啟「惡劣天氣備援」且擁有 FCM Token 的使用者設備 (加入 id)
     const { data: devices, error } = await supabase
       .from('devices')
       .select(`
+        id,
         name, 
         address, 
         profiles!inner(fcm_token, backup_protection_enabled)
@@ -96,34 +97,52 @@ serve(async (_req) => {
         if (matchedKeyword) break;
       }
 
-      // 4. 若有惡劣天氣，使用 V1 架構觸發推播
+      // 4. 若有惡劣天氣，使用 V1 架構廣播推播
       if (matchedKeyword) {
-        console.log(`⚠️ [警報觸發] ${city} 預報出現「${matchedKeyword}」(${matchedWxText})，準備發送推播給 ${cityDevices.length} 台設備！`);
+        console.log(`⚠️ [警報觸發] ${city} 預報出現「${matchedKeyword}」(${matchedWxText})，準備發送推播給 ${cityDevices.length} 台設備群組！`);
         
         for (const device of cityDevices) {
-          const fcmToken = device.profiles.fcm_token;
-          const notifyBody = `「${device.name}」預報未來3~6小時可能出現（${matchedWxText}），建議啟動惡劣天氣備援模式。`;
+          const notifyBody = `「${device.name}」所在區域，在未來3~6小時可能出現 ${matchedWxText}，建議啟動惡劣天氣備援模式。`;
 
-          // 使用 FCM V1 的專屬 JSON 格式發送推播
-          await fetch(fcmEndpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${fcmAccessToken}`
-            },
-            body: JSON.stringify({
-              message: {
-                token: fcmToken,
-                notification: {
-                  title: '⛈️ 惡劣天氣預警通知',
-                  body: notifyBody
+          // 🎯 收集擁有者 Token
+          const tokens = new Set<string>();
+          if (device.profiles?.fcm_token) tokens.add(device.profiles.fcm_token);
+
+          // 🎯 動態查詢此設備是否有人開啟了共享推播 (對齊真實欄位)
+          const { data: shares } = await supabase.from('device_shares')
+            .select('shared_to_user_id')
+            .eq('device_id', device.id)
+            .eq('allow_notifications', true);
+
+          if (shares && shares.length > 0) {
+            const sharedUserIds = shares.map(s => s.shared_to_user_id).filter(Boolean);
+            if (sharedUserIds.length > 0) {
+              const { data: sharedProfiles } = await supabase.from('profiles').select('fcm_token').in('id', sharedUserIds);
+              sharedProfiles?.forEach(p => { if (p.fcm_token) tokens.add(p.fcm_token); });
+            }
+          }
+
+          // 對所有收集到的 Token 進行發送
+          for (const targetToken of Array.from(tokens)) {
+            await fetch(fcmEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${fcmAccessToken}`
+              },
+              body: JSON.stringify({
+                message: {
+                  token: targetToken,
+                  notification: {
+                    title: '⛈️ 惡劣天氣預警通知',
+                    body: notifyBody
+                  }
                 }
-              }
-            })
-          });
-          
-          pushCount++;
-          console.log(`   👉 已發送推播給設備: ${device.name}`);
+              })
+            });
+          }
+          pushCount += tokens.size;
+          console.log(`   👉 設備 ${device.name} 群組，共發送了 ${tokens.size} 則預警`);
         }
       } else {
         console.log(`🌤️ [天氣良好] ${city} 未來 6 小時無惡劣天氣。`);
@@ -131,7 +150,7 @@ serve(async (_req) => {
     }
 
     console.log(`🎉 [排程結束] 本次總共發送了 ${pushCount} 則預警推播！`);
-    return new Response(JSON.stringify({ success: true, message: "氣象掃描與 V1 推播完成" }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ success: true, message: "氣象掃描與 V1 廣播推播完成" }), { headers: { "Content-Type": "application/json" } });
   } catch (error: any) {
     console.error("❌ [系統嚴重錯誤]:", error.message);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
