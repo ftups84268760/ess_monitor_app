@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
@@ -128,66 +129,122 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _changePasswordDialog() {
     _newPasswordController.clear();
     _confirmPasswordController.clear();
+    
+    bool isNewPasswordVisible = false;
+    bool isConfirmPasswordVisible = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        title: const Text('修改密碼', style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _newPasswordController,
-              obscureText: true,
-              style: const TextStyle(color: Colors.black87, fontSize: 13),
-              decoration: const InputDecoration(labelText: '請輸入全新密碼', labelStyle: TextStyle(color: Colors.black26, fontSize: 11)),
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AlertDialog(
+              backgroundColor: Colors.black.withValues(alpha: 0.6),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+              ),
+              title: const Text('修改密碼', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _newPasswordController,
+                    obscureText: !isNewPasswordVisible,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: '新密碼(最少6個字元)',
+                      labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+                      enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isNewPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                          color: Colors.white54,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setStateDialog(() {
+                            isNewPasswordVisible = !isNewPasswordVisible;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _confirmPasswordController,
+                    obscureText: !isConfirmPasswordVisible,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: '再次確認新密碼',
+                      labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+                      enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          isConfirmPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                          color: Colors.white54,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setStateDialog(() {
+                            isConfirmPasswordVisible = !isConfirmPasswordVisible;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('取消', style: TextStyle(color: Colors.grey))
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final p1 = _newPasswordController.text;
+                    final p2 = _confirmPasswordController.text;
+                    
+                    if (p1.isEmpty || p2.isEmpty) return;
+                    if (p1 != p2) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('兩次密碼不一致')));
+                      return;
+                    }
+                    if (p1.length < 6) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼長度至少需要6個字元')));
+                      return;
+                    }
+
+                    try {
+                      await Supabase.instance.client.auth.updateUser(UserAttributes(password: p1));
+                      if (!context.mounted) return;
+                      Navigator.pop(dialogContext);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼更新成功！', style: TextStyle(color: Colors.white)), backgroundColor: Colors.teal));
+                    } catch (e) {
+                      debugPrint('密碼更新失敗: $e'); 
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼更新失敗，請檢查網路連線', style: TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
+                    }
+                  },
+                  child: const Text('確認修改', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold)),
+                ),
+              ],
             ),
-            TextField(
-              controller: _confirmPasswordController,
-              obscureText: true,
-              style: const TextStyle(color: Colors.black87, fontSize: 13),
-              decoration: const InputDecoration(labelText: '請再次確認新密碼', labelStyle: TextStyle(color: Colors.black26, fontSize: 11)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-          TextButton(
-            onPressed: () async {
-              final p1 = _newPasswordController.text;
-              final p2 = _confirmPasswordController.text;
-              if (p1.isEmpty || p2.isEmpty) return;
-              if (p1 != p2) return;
-    
-              try {
-              // 1. 執行非同步操作
-              await Supabase.instance.client.auth.updateUser(UserAttributes(password: p1));
-      
-              // 2. 檢查 context 本身是否還有效 (解決 use_build_context_synchronously)
-              if (!context.mounted) return; 
-      
-              // 3. 安全地使用 context
-              Navigator.pop(context);
-      
-              } catch (e) {
-              // 解決 empty_catches 警告：即使不顯示給使用者看，也建議在開發階段印出錯誤，避免 Debug 困難
-             debugPrint('密碼更新失敗: $e'); 
-             }
-            },
-            child: const Text('確認修改', style: TextStyle(color: Colors.teal)),
-          ),
-        ],
+          );
+        }
       ),
     );
   }
 
-  // 🎯 核心實作：安全的登出機制 (清空 FCM Token)
   Future<void> _handleSecureLogout() async {
-    setState(() { _isActionLoading = true; }); // 啟動畫面轉圈圈，防止重複點擊
+    setState(() { _isActionLoading = true; }); 
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        // 先去資料庫把當前帳號的 FCM Token 註銷 (設為 null)
         await Supabase.instance.client
             .from('profiles')
             .update({'fcm_token': null})
@@ -195,9 +252,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       debugPrint('清除 FCM Token 失敗: $e');
-      // 即使清除 Token 失敗（例如沒網路），我們還是要讓使用者登出，所以這裡只做 debugPrint
     } finally {
-      // 確保將狀態回傳並執行原本的登出邏輯 (通常會包含 Supabase 登出與畫面跳轉)
       await widget.onLogout();
       if (mounted) {
         setState(() { _isActionLoading = false; });
@@ -222,13 +277,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 14),
                       Stack(
                         children: [
-                          CircleAvatar(
-                            radius: 46,
-                            backgroundColor: Colors.grey[200],
-                            backgroundImage: widget.avatarUrl != null ? NetworkImage(widget.avatarUrl!) : null,
-                            child: widget.avatarUrl == null
-                                ? const Text('FT', style: TextStyle(fontSize: 28, color: Colors.teal, fontWeight: FontWeight.bold))
-                                : null,
+                          Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))
+                              ]
+                            ),
+                            child: CircleAvatar(
+                              radius: 46,
+                              backgroundColor: Colors.grey[100],
+                              backgroundImage: widget.avatarUrl != null ? NetworkImage(widget.avatarUrl!) : null,
+                              child: widget.avatarUrl == null
+                                  ? const Text('FT', style: TextStyle(fontSize: 28, color: Colors.teal, fontWeight: FontWeight.bold))
+                                  : null,
+                            ),
                           ),
                           Positioned(
                             bottom: 0, right: 0,
@@ -264,26 +327,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12)),
-                        child: Text(widget.accountType, style: const TextStyle(color: Colors.teal, fontSize: 11)),
+                        decoration: BoxDecoration(color: Colors.teal.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+                        child: Text(widget.accountType, style: const TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.w600)),
                       )
                     ],
                   ),
                 ),
                 const SizedBox(height: 30),
-                const Text('個人化設定', style: TextStyle(color: Colors.black38, fontSize: 12, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Card(
-                  color: Colors.white,
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey[100]!)),
+                const Padding(
+                  padding: EdgeInsets.only(left: 8.0, bottom: 8.0),
+                  child: Text('個人化設定', style: TextStyle(color: Colors.black45, fontSize: 12, fontWeight: FontWeight.bold)),
+                ),
+                
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))
+                    ]
+                  ),
                   child: Column(
                     children: [
-                      // 🎯 新增：只有 root 管理員才看得到的系統級進階設定
                       if (widget.accountType == '系統管理員(root)') ...[
                         ListTile(
+                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
                           leading: const Icon(Icons.admin_panel_settings, color: Colors.redAccent),
-                          title: const Text('進階設定(root權限專用)', style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+                          title: const Text('進階設定(root權限)', style: TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.bold)),
                           trailing: const Icon(Icons.chevron_right, color: Colors.black26),
                           onTap: () {
                             Navigator.push(
@@ -292,32 +362,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             );
                           },
                         ),
-                        const Divider(color: Colors.black12, height: 1),
+                        const Divider(color: Color(0xFFF1F5F9), height: 1),
                       ],
                       ListTile(
-                        leading: const Icon(Icons.lock_reset_rounded, color: Colors.black45),
-                        title: const Text('修改密碼', style: TextStyle(color: Colors.black87, fontSize: 13)),
+                        leading: const Icon(Icons.lock_reset_rounded, color: Colors.teal),
+                        title: const Text('修改密碼', style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
                         trailing: const Icon(Icons.chevron_right, color: Colors.black26),
                         onTap: _changePasswordDialog,
                       ),
-                      const Divider(color: Colors.black12, height: 1),
-                     ListTile(
-                        leading: const Icon(Icons.notifications_active_outlined, color: Colors.black45),
-                        title: const Text('系統推播通知設定', style: TextStyle(color: Colors.black87, fontSize: 13)),
+                      const Divider(color: Color(0xFFF1F5F9), height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.notifications_active_rounded, color: Colors.teal),
+                        title: const Text('系統推播通知設定', style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
                         trailing: const Icon(Icons.chevron_right, color: Colors.black26),
                         onTap: () async {
                           final user = Supabase.instance.client.auth.currentUser;
                           if (user != null) {
                             try {
-                              // 🎯 替換：呼叫 RPC，讓「自己擁有」和「別人分享」的設備都能通過檢查
                               final response = await Supabase.instance.client.rpc('get_accessible_devices');
                               final List devices = response as List;
 
                               if (!context.mounted) return;
 
-                              // 🎯 判斷設備清單是否為空
                               if (devices.isNotEmpty) {
-                                // 有設備：取第一台設備的 ID 正常跳轉
                                 Navigator.push(
                                   context, 
                                   MaterialPageRoute(
@@ -325,7 +392,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   )
                                 );
                               } else {
-                                // 無設備：彈出友善的提示訊息
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                     content: Text('請先新增首台設備(或 接收分享設備)，即可開啟推播設定。'),
@@ -344,10 +410,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           }
                         },
                       ),
-                      const Divider(color: Colors.black12, height: 1),
+                      const Divider(color: Color(0xFFF1F5F9), height: 1),
                       ListTile(
-                        leading: const Icon(Icons.info_outline_rounded, color: Colors.black45),
-                        title: const Text('軟體資訊', style: TextStyle(color: Colors.black87, fontSize: 13)),
+                        leading: const Icon(Icons.info_rounded, color: Colors.teal),
+                        title: const Text('軟體資訊', style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
                         trailing: const Icon(Icons.chevron_right, color: Colors.black26),
                         onTap: () {
                           Navigator.push(
@@ -356,11 +422,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           );
                         },
                       ),
-                      const Divider(color: Colors.black12, height: 1),
+                      const Divider(color: Color(0xFFF1F5F9), height: 1),
                       ListTile(
+                        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(16))),
                         leading: const Icon(Icons.no_accounts_rounded, color: Colors.redAccent),
-                        title: const Text('帳號刪除註銷', style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w500)),
-                        trailing: const Icon(Icons.chevron_right, color: Colors.black26, size: 18),
+                        title: const Text('帳號刪除註銷', style: TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.w500)),
+                        trailing: const Icon(Icons.chevron_right, color: Colors.redAccent, size: 18),
                         onTap: () {
                           Navigator.push(
                             context,
@@ -371,35 +438,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    backgroundColor: Colors.red[50],
-                    foregroundColor: Colors.red[700],
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Colors.red[200]!, width: 0.5)),
-                  ),
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        backgroundColor: Colors.white,
-                        title: const Text('登出', style: TextStyle(color: Colors.black87, fontSize: 16)),
-                        content: const Text('您確定要登出嗎？', style: TextStyle(color: Colors.black54, fontSize: 12)),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-                          TextButton(
-                            // 🎯 替換：改呼叫我們寫好的 _handleSecureLogout
-                            onPressed: () { Navigator.pop(context); _handleSecureLogout(); },
-                            child: const Text('確定登出', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+                
+                const SizedBox(height: 32),
+                
+                // 🎯 修改：改為純紅色實心、白字、帶輕微陰影的按鈕，與天氣備援按鈕風格一致
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor: Colors.red.shade600, // 實心深紅
+                      foregroundColor: Colors.white,        // 文字純白
+                      elevation: 2,                         // 懸浮陰影
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: AlertDialog(
+                            backgroundColor: Colors.black.withValues(alpha: 0.6),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                              side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.3), width: 1.5),
+                            ),
+                            title: const Text('登出', style: TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.bold)),
+                            content: const Text('您確定要登出並離開系統嗎？', style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+                              TextButton(
+                                onPressed: () { Navigator.pop(context); _handleSecureLogout(); },
+                                child: const Text('確定登出', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold))
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                  child: const Text('帳號登出', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                        ),
+                      );
+                    },
+                    child: const Text('帳號登出', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  ),
                 ),
+                const SizedBox(height: 40),
               ],
             ),
       ),
@@ -450,36 +531,45 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('註銷確認', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-        content: const Text('您確定要完全註銷此帳號嗎？此操作將會清除所有雲端數據，且永遠無法被恢復。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-          TextButton(
-            onPressed: () async {
-              navigator.pop();
-              try {
-                final user = Supabase.instance.client.auth.currentUser;
-                if (user != null) {
-                  await Supabase.instance.client.storage.from('avatars').remove(['${user.id}.jpg']);
-                }
-
-                await Supabase.instance.client.rpc('delete_user_own_account');
-                await widget.onLogout();
-                navigator.pop();
-
-                scaffoldMessenger.showSnackBar(
-                  const SnackBar(content: Text('您的帳號已成功銷毀註銷，感謝您的使用。'), backgroundColor: Colors.teal)
-                );
-              } catch (e) {
-                scaffoldMessenger.showSnackBar(
-                  const SnackBar(content: Text('註銷執行失敗，請確認雲端連線狀態。'), backgroundColor: Colors.redAccent)
-                );
-              }
-            },
-            child: const Text('確定註銷', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.black.withValues(alpha: 0.6),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.3), width: 1.5),
           ),
-        ],
+          title: const Text('註銷確認', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          content: const Text('您確定要完全註銷此帳號嗎？此操作將會清除所有雲端數據，且永遠無法被恢復。', style: TextStyle(color: Colors.white70, height: 1.5)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+            TextButton(
+              onPressed: () async {
+                navigator.pop();
+                try {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  if (user != null) {
+                    await Supabase.instance.client.storage.from('avatars').remove(['${user.id}.jpg']);
+                  }
+
+                  await Supabase.instance.client.rpc('delete_user_own_account');
+                  await widget.onLogout();
+                  navigator.pop();
+
+                  scaffoldMessenger.showSnackBar(
+                    const SnackBar(content: Text('您的帳號已成功銷毀註銷，感謝您的使用。'), backgroundColor: Colors.teal)
+                  );
+                } catch (e) {
+                  scaffoldMessenger.showSnackBar(
+                    const SnackBar(content: Text('註銷執行失敗，請確認雲端連線狀態。'), backgroundColor: Colors.redAccent)
+                  );
+                }
+              },
+              child: const Text('確定註銷', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -487,7 +577,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: Colors.white, 
       appBar: AppBar(
         title: const Text('註銷帳號', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
@@ -506,7 +596,11 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+                    decoration: BoxDecoration(
+                      color: Colors.white, 
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
+                    ),
                     child: const Text(
                       '1. 註銷帳號後，您的身份、帳號、設備資訊與資料都將會被清空，並且無法恢復。\n\n'
                       '2. 註銷帳號後，您可重新使用該電子信箱進行註冊，但相關資訊將被清空。\n\n'
@@ -517,7 +611,11 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+                    decoration: BoxDecoration(
+                      color: Colors.white, 
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -562,7 +660,9 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _canDelete ? const Color(0xFFFF522D) : Colors.grey[400],
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12), 
+                        ),
                         elevation: 0,
                       ),
                       onPressed: _canDelete ? _executeAccountDeletion : () {
@@ -573,6 +673,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                       child: const Text('確認註銷', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
                     ),
                   ),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
@@ -591,23 +692,18 @@ class SoftwareInfoScreen extends StatefulWidget {
 }
 
 class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
-  String _version = '讀取中...'; // 🎯 新增變數來儲存版本號
+  String _version = '讀取中...'; 
 
   @override
   void initState() {
     super.initState();
-    _initPackageInfo(); // 🎯 畫面初始化時讀取版本號
+    _initPackageInfo(); 
   }
 
-  // 🎯 核心功能：非同步讀取 pubspec.yaml 的版本資訊
   Future<void> _initPackageInfo() async {
     try {
       final PackageInfo info = await PackageInfo.fromPlatform();
       setState(() {
-        // 如果 pubspec.yaml 寫的是 1.0.0+5
-        // info.version 會取得 "1.0.0"
-        // info.buildNumber 會取得 "5"
-        // 您可以依照喜好組合，這裡示範組合在一起
         _version = '${info.version} (Build ${info.buildNumber})'; 
       });
     } catch (e) {
@@ -628,7 +724,7 @@ class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: Colors.white, 
       appBar: AppBar(
         title: const Text('軟體資訊', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
@@ -643,7 +739,7 @@ class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
           Container(
             width: double.infinity,
             color: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 30),
+            padding: const EdgeInsets.symmetric(vertical: 20),
             child: Column(
               children: [
                 Container(
@@ -654,8 +750,8 @@ class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
                     ], 
                   ),
@@ -670,17 +766,19 @@ class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
                 const SizedBox(height: 16),
                 const Text('FTESS Home', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 6),
-                // 🎯 替換：原本寫死的文字，改為顯示動態讀取到的 _version 變數
-                Text('Version $_version', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                Text('Version $_version', style: const TextStyle(fontSize: 13, color: Colors.teal, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
           
-          const SizedBox(height: 12),
-          
           Expanded(
             child: Container(
-              color: Colors.white,
+              margin: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white, 
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
+              ),
               width: double.infinity,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -689,7 +787,7 @@ class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
                     padding: EdgeInsets.only(left: 20, top: 16, bottom: 8),
                     child: Text('隱私權政策', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
                   ),
-                  const Divider(height: 1, color: Colors.black12),
+                  const Divider(height: 1, color: Color(0xFFF1F5F9)),
                   Expanded(
                     child: FutureBuilder<String>(
                       future: _loadPrivacyPolicy(),
@@ -714,6 +812,7 @@ class _SoftwareInfoScreenState extends State<SoftwareInfoScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 20),
         ],
       ),
     );

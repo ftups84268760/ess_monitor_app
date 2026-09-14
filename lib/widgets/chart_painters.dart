@@ -1,11 +1,9 @@
-// lib/widgets/chart_painters.dart
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:path_drawing/path_drawing.dart';
 import 'package:vector_math/vector_math_64.dart' as vector_math;
 import '../models/energy_path_config.dart';
 
-// 能流圖核心 Painter 定義
 class EnergyFlowPainter extends CustomPainter {
   final double progress;
   final int dcAcPowerDirection;
@@ -72,10 +70,23 @@ class EnergyFlowPainter extends CustomPainter {
       Path originalPath = parseSvgPathData(config.svgPath);
       Path finalPath = originalPath.transform(scaleMatrix.storage);
 
+      // 🎯 1. 新增：建立管線的右側陰影
+      final shadowPaint = Paint()
+        ..color = Colors.black.withValues(alpha: 0.35) // 陰影顏色與透明度
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0 // 與管線寬度保持一致
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0); // 設定模糊程度
+
+      // 將陰影路徑向右平移 5.0，向下平移 2.0 (產生右側光源投射效果)
+      final Path shadowPath = finalPath.shift(const Offset(5.5, 2.0));
+      canvas.drawPath(shadowPath, shadowPaint);
+
+      // 🎯 2. 原本的管線底色 (蓋在陰影上方)
       final baseLinePaint = Paint()
         ..color = config.baseLineColor
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.5
+        ..strokeWidth = 3.0
         ..strokeCap = StrokeCap.round;
 
       canvas.drawPath(finalPath, baseLinePaint);
@@ -132,7 +143,7 @@ class EnergyFlowPainter extends CustomPainter {
     Paint blurGlowPaint = Paint()
       ..color = color.withValues(alpha: 0.45 * fadeAlpha) 
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.7
+      ..strokeWidth = 3.2
       ..strokeCap = StrokeCap.round;
 
     canvas.drawPath(path, blurGlowPaint);
@@ -140,7 +151,7 @@ class EnergyFlowPainter extends CustomPainter {
     Paint coreBeamPaint = Paint()
       ..color = color.withValues(alpha: 1.0 * fadeAlpha)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5
+      ..strokeWidth = 3.0
       ..strokeCap = StrokeCap.round;
 
     canvas.drawPath(path, coreBeamPaint);
@@ -155,13 +166,15 @@ class EnergyFlowPainter extends CustomPainter {
       oldDelegate.loadPower != loadPower;
 }
 
-// 🎯 雙 Y 軸、strokeWidth = 1.2 Painter
 class DualAxisPowerChartPainter extends CustomPainter {
   final List<Map<String, dynamic>> historyTest;
   final List<Map<String, dynamic>> historyInvPs;
   final String chartMode;
   final Offset? touchPosition;
   final double? maxY;
+  
+  final String tariffMode;      
+  final DateTime selectedDate;  
 
   DualAxisPowerChartPainter({
     required this.historyTest,
@@ -169,6 +182,8 @@ class DualAxisPowerChartPainter extends CustomPainter {
     required this.chartMode,
     required this.touchPosition,
     this.maxY,
+    required this.tariffMode,
+    required this.selectedDate,
   });
 
   double _calcX(String rawTime, double leftMargin, double chartWidth) {
@@ -178,6 +193,65 @@ class DualAxisPowerChartPainter extends CustomPainter {
     int second = int.tryParse(rawTime.substring(17, 19)) ?? 0;
     double fraction = (hour * 3600 + minute * 60 + second) / 86400.0;
     return leftMargin + chartWidth * fraction;
+  }
+
+  Color _getTouBackgroundColor(int hour) {
+    if (tariffMode == '一般累進表燈(住商)') return Colors.transparent;
+
+    final int month = selectedDate.month;
+    final int weekday = selectedDate.weekday; 
+    final bool isSummer = (month >= 6 && month <= 9);
+
+    final Color peakColor = Colors.redAccent.withValues(alpha: 0.2);
+    final Color midPeakColor = Colors.orangeAccent.withValues(alpha: 0.2);
+    final Color offPeakColor = Colors.teal.withValues(alpha: 0.2);
+
+    if (tariffMode == '簡易型(二段式)') {
+      if (isSummer) {
+        if (weekday <= 5 && hour >= 9) return peakColor;
+        return offPeakColor;
+      } else {
+        if (weekday <= 5 && ((hour >= 6 && hour < 11) || (hour >= 14))) return peakColor;
+        return offPeakColor;
+      }
+    } else if (tariffMode == '簡易型(三段式)') {
+      if (isSummer) {
+        if (weekday <= 5) {
+          if (hour >= 16) return peakColor;
+          if (hour >= 9) return midPeakColor;
+          return offPeakColor;
+        }
+        return offPeakColor;
+      } else {
+        if (weekday <= 5 && ((hour >= 6 && hour < 11) || (hour >= 14))) return midPeakColor;
+        return offPeakColor;
+      }
+    } else if (tariffMode == '標準型(二段式)') {
+      if (isSummer) {
+        if (weekday <= 5 && hour >= 9) return peakColor;
+        if (weekday == 6 && hour >= 9) return midPeakColor;
+        return offPeakColor;
+      } else {
+        if (weekday <= 5 && ((hour >= 6 && hour < 11) || (hour >= 14))) return peakColor;
+        if (weekday == 6 && ((hour >= 6 && hour < 11) || (hour >= 14))) return midPeakColor;
+        return offPeakColor;
+      }
+    } else if (tariffMode == '標準型(三段式)') {
+      if (isSummer) {
+        if (weekday <= 5) {
+          if (hour >= 16) return peakColor;
+          if (hour >= 9) return midPeakColor;
+          return offPeakColor;
+        }
+        if (weekday == 6 && hour >= 9) return midPeakColor;
+        return offPeakColor;
+      } else {
+        if (weekday <= 5 && ((hour >= 6 && hour < 11) || (hour >= 14))) return midPeakColor;
+        if (weekday == 6 && ((hour >= 6 && hour < 11) || (hour >= 14))) return midPeakColor;
+        return offPeakColor;
+      }
+    }
+    return Colors.transparent;
   }
 
   @override
@@ -191,9 +265,63 @@ class DualAxisPowerChartPainter extends CustomPainter {
     final double chartHeight = size.height - topMargin - bottomMargin;
     final double midY = topMargin + (chartHeight / 2.0);
 
-    Paint gridPaint = Paint()..color = Colors.grey[200]!..strokeWidth = 1.0;
+    // 🎯 核心優化：動態計算各圖表的 Max kW 值
+    double computedMaxKw = maxY ?? 12.0; 
+    
+    if (chartMode == 'overview') {
+      double maxW = 0.0;
+      for (var item in historyInvPs) {
+        double load = (double.tryParse((item['ac_out_total_active_power'] ?? 0).toString()) ?? 0.0).abs();
+        double s1 = (double.tryParse((item['solar1_input_power'] ?? 0).toString()) ?? 0.0).abs();
+        double s2 = (double.tryParse((item['solar2_input_power'] ?? 0).toString()) ?? 0.0).abs();
+        double acIn = (double.tryParse((item['ac_in_total_active_power'] ?? 0).toString()) ?? 0.0).abs();
+        
+        if (load > maxW) maxW = load;
+        if ((s1 + s2) > maxW) maxW = (s1 + s2);
+        if (acIn > maxW) maxW = acIn;
+      }
+      for (var item in historyTest) {
+        double batV = (double.tryParse((item['battery_voltage'] ?? 0).toString()) ?? 0.0).abs();
+        double batI = (double.tryParse((item['battery_current'] ?? 0).toString()) ?? 0.0).abs();
+        if ((batV * batI) > maxW) maxW = batV * batI;
+      }
+      double maxKwVal = maxW / 1000.0;
+      computedMaxKw = maxKwVal <= 0 ? 12.0 : (maxKwVal.ceilToDouble() + 2.0).clamp(0.0, 12.0);
 
-    // 繪製 Y 軸與網格
+    // 🎯 住宅(Home) 與 電網(Grid) 的動態 kW 計算上限為 15.0
+    } else if (chartMode == 'home') {
+      double maxW = 0.0;
+      for (var item in historyInvPs) {
+        double load = (double.tryParse((item['ac_out_total_active_power'] ?? 0).toString()) ?? 0.0).abs();
+        if (load > maxW) maxW = load;
+      }
+      double maxKwVal = maxW / 1000.0;
+      computedMaxKw = maxKwVal <= 0 ? 15.0 : (maxKwVal.ceilToDouble() + 2.0).clamp(0.0, 15.0);
+
+    } else if (chartMode == 'grid') {
+      double maxW = 0.0;
+      for (var item in historyInvPs) {
+        double acIn = (double.tryParse((item['ac_in_total_active_power'] ?? 0).toString()) ?? 0.0).abs();
+        if (acIn > maxW) maxW = acIn;
+      }
+      double maxKwVal = maxW / 1000.0;
+      computedMaxKw = maxKwVal <= 0 ? 15.0 : (maxKwVal.ceilToDouble() + 2.0).clamp(0.0, 15.0);
+    }
+
+    if (tariffMode != '一般累進表燈(住商)') {
+      for (int h = 0; h < 24; h++) {
+        Color bgColor = _getTouBackgroundColor(h);
+        if (bgColor != Colors.transparent) {
+          double startX = leftMargin + chartWidth * (h / 24.0);
+          double endX = leftMargin + chartWidth * ((h + 1) / 24.0);
+          Rect rect = Rect.fromLTRB(startX, topMargin, endX, topMargin + chartHeight);
+          canvas.drawRect(rect, Paint()..color = bgColor);
+        }
+      }
+    }
+
+    Paint gridPaint = Paint()..color = Colors.grey.withValues(alpha: 0.15)..strokeWidth = 1.0;
+
     if (chartMode == 'battery') {
       for (int i = 0; i <= 4; i++) {
         double y = topMargin + (chartHeight / 4.0) * i;
@@ -203,43 +331,49 @@ class DualAxisPowerChartPainter extends CustomPainter {
       }
       _drawText(canvas, '%', Offset(10, 0), Colors.black38, 9);
       _drawText(canvas, 'A', Offset(size.width - rightMargin + 10, 0), Colors.black38, 9);
+      
+    } else if (chartMode == 'overview') {
+      for (int i = 0; i <= 4; i++) {
+        double y = topMargin + (chartHeight / 4.0) * i;
+        canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), gridPaint);
+        double val = computedMaxKw - i * (computedMaxKw / 2.0); 
+        String label = val.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+        _drawText(canvas, label, Offset(5, y - 6), Colors.black38, 9);
+      }
+      _drawText(canvas, 'kW', Offset(10, 0), Colors.black38, 9);
+      
+    // 🎯 修改：更新 Home 與 Grid 圖表的縱軸動態刻度，左側為 V(0-240)，右側為 kW
+    } else if (chartMode == 'grid' || chartMode == 'home') {
+      for (int i = 0; i <= 5; i++) {
+        double y = topMargin + (chartHeight / 5.0) * i;
+        canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), gridPaint);
+        double ratio = (5 - i) / 5.0;
+        
+        _drawText(canvas, '${(240 * ratio).toInt()}', Offset(5, y - 6), Colors.black38, 9);
+        
+        double kwVal = computedMaxKw * ratio;
+        String label = kwVal.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+        _drawText(canvas, label, Offset(size.width - rightMargin + 5, y - 6), Colors.black38, 9);
+      }
+      _drawText(canvas, 'V', Offset(10, 0), Colors.black38, 9);
+      _drawText(canvas, 'kW', Offset(size.width - rightMargin + 10, 0), Colors.black38, 9);
+
     } else {
       for (int i = 0; i <= 5; i++) {
         double y = topMargin + (chartHeight / 5.0) * i;
         canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), gridPaint);
         double ratio = (5 - i) / 5.0;
         
-        if (chartMode == 'grid') {
-          _drawText(canvas, '${(70 * ratio).toInt()}', Offset(5, y - 6), Colors.black38, 9);
-          _drawText(canvas, '${(120 * ratio).toInt()}', Offset(size.width - rightMargin + 5, y - 6), Colors.black38, 9);
-        } else if (chartMode == 'home') {
-          _drawText(canvas, '${(100 * ratio).toInt()}', Offset(5, y - 6), Colors.black38, 9);
-          _drawText(canvas, '${(120 * ratio).toInt()}', Offset(size.width - rightMargin + 5, y - 6), Colors.black38, 9);
-        } else if (chartMode == 'solar') {
+        if (chartMode == 'solar') {
           double maxLeft = maxY ?? 6000.0;
           _drawText(canvas, '${(maxLeft * ratio).toInt()}', Offset(5, y - 6), Colors.black38, 9);
-        } else if (chartMode == 'overview') {
-          double maxLeft = maxY ?? 5000.0;
-          _drawText(canvas, '${(maxLeft * ratio).toInt()}', Offset(5, y - 6), Colors.black38, 9);
-          _drawText(canvas, '${(100 * ratio).toInt()}', Offset(size.width - rightMargin + 5, y - 6), Colors.black38, 9);
         } 
       }
-      
-      if (chartMode == 'grid') {
-        _drawText(canvas, 'Hz', Offset(10, 0), Colors.black38, 9);
-        _drawText(canvas, 'V', Offset(size.width - rightMargin + 10, 0), Colors.black38, 9);
-      } else if (chartMode == 'home') {
-        _drawText(canvas, '%', Offset(10, 0), Colors.black38, 9);
-        _drawText(canvas, 'V', Offset(size.width - rightMargin + 10, 0), Colors.black38, 9);
-      } else if (chartMode == 'solar') {
+      if (chartMode == 'solar') {
         _drawText(canvas, 'W', Offset(10, 0), Colors.black38, 9);
-      } else {
-        _drawText(canvas, 'W', Offset(10, 0), Colors.black38, 9);
-        _drawText(canvas, '%', Offset(size.width - rightMargin + 10, 0), Colors.black38, 9);
       }
     }
 
-    // X 軸時間
     List<String> timeLabels = ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'];
     for (int i = 0; i < timeLabels.length; i++) {
       double x = leftMargin + (chartWidth / (timeLabels.length - 1)) * i;
@@ -249,72 +383,97 @@ class DualAxisPowerChartPainter extends CustomPainter {
     List<Offset> line1Points = [];
     List<Offset> line2Points = [];
     List<Offset> line3Points = [];
+    List<Offset> line4Points = [];
 
-    // telemetry_inv_ps：現在提供 overview, home, solar 的功率與負載
+    double clampY(double y) => y.clamp(topMargin, topMargin + chartHeight);
+
     for (var item in historyInvPs) {
       double x = _calcX(item['created_at']?.toString() ?? '', leftMargin, chartWidth);
       if (chartMode == 'overview') {
         double load = double.tryParse((item['ac_out_total_active_power'] ?? 0).toString()) ?? 0.0;
         double s1 = double.tryParse((item['solar1_input_power'] ?? 0).toString()) ?? 0.0;
         double s2 = double.tryParse((item['solar2_input_power'] ?? 0).toString()) ?? 0.0;
-        double maxLeft = maxY ?? 5000.0;
-        line1Points.add(Offset(x, topMargin + chartHeight - (load / maxLeft) * chartHeight));
-        line2Points.add(Offset(x, topMargin + chartHeight - ((s1 + s2) / maxLeft) * chartHeight));
+        double acIn = double.tryParse((item['ac_in_total_active_power'] ?? 0).toString()) ?? 0.0;
+        
+        double maxKw = computedMaxKw; 
+        
+        line1Points.add(Offset(x, clampY(midY - ((load / 1000.0) / maxKw) * (chartHeight / 2.0))));
+        line2Points.add(Offset(x, clampY(midY - (((s1 + s2) / 1000.0) / maxKw) * (chartHeight / 2.0))));
+        line3Points.add(Offset(x, clampY(midY - ((acIn / 1000.0) / maxKw) * (chartHeight / 2.0))));
+
+      // 🎯 修改：Home(住宅) 模式下，從負載比例改為輸出功率投影計算
       } else if (chartMode == 'home') {
-        double loadP = double.tryParse((item['ac_out_power_percentage'] ?? 0).toString()) ?? 0.0;
-        line3Points.add(Offset(x, topMargin + chartHeight - (loadP / 100.0) * chartHeight));
+        double loadW = double.tryParse((item['ac_out_total_active_power'] ?? 0).toString()) ?? 0.0;
+        line3Points.add(Offset(x, clampY(topMargin + chartHeight - ((loadW / 1000.0) / computedMaxKw) * chartHeight)));
+        
       } else if (chartMode == 'solar') {
         double s1 = double.tryParse((item['solar1_input_power'] ?? 0).toString()) ?? 0.0;
         double s2 = double.tryParse((item['solar2_input_power'] ?? 0).toString()) ?? 0.0;
         double maxLeft = maxY ?? 6000.0;
         line1Points.add(Offset(x, topMargin + chartHeight - (s1 / maxLeft) * chartHeight));
         line2Points.add(Offset(x, topMargin + chartHeight - (s2 / maxLeft) * chartHeight));
+        
+      // 🎯 修改：Grid(電網) 模式下，使用動態計算投影
+      } else if (chartMode == 'grid') {
+        double acInW = double.tryParse((item['ac_in_total_active_power'] ?? 0).toString()) ?? 0.0;
+        line3Points.add(Offset(x, clampY(topMargin + chartHeight - ((acInW / 1000.0) / computedMaxKw) * chartHeight)));
       }
     }
 
-    // telemetry_test 供應 battery, home, grid
     for (var item in historyTest) {
       double x = _calcX(item['created_at']?.toString() ?? '', leftMargin, chartWidth);
       if (chartMode == 'battery') {
         double cap = double.tryParse((item['battery_capacity'] ?? 0).toString()) ?? 0.0;
         double batI = double.tryParse((item['battery_current'] ?? 0).toString()) ?? 0.0;
         line1Points.add(Offset(x, topMargin + chartHeight - (cap / 100.0) * chartHeight));
-        line2Points.add(Offset(x, (midY - (batI / 100.0) * (chartHeight / 2.0)).clamp(topMargin, topMargin + chartHeight)));
+        line2Points.add(Offset(x, clampY(midY - (batI / 100.0) * (chartHeight / 2.0))));
       } else if (chartMode == 'home') {
         double vR = double.tryParse((item['ac_out_v_r'] ?? 0).toString()) ?? 0.0;
         double vS = double.tryParse((item['ac_out_v_s'] ?? 0).toString()) ?? 0.0;
-        line1Points.add(Offset(x, topMargin + chartHeight - (vR / 120.0) * chartHeight));
-        line2Points.add(Offset(x, topMargin + chartHeight - (vS / 120.0) * chartHeight));
+        line1Points.add(Offset(x, topMargin + chartHeight - (vR / 240.0) * chartHeight));
+        line2Points.add(Offset(x, topMargin + chartHeight - (vS / 240.0) * chartHeight));
       } else if (chartMode == 'grid') {
         double vR = double.tryParse((item['ac_in_v_r'] ?? 0).toString()) ?? 0.0;
         double vS = double.tryParse((item['ac_in_v_s'] ?? 0).toString()) ?? 0.0;
-        double freq = double.tryParse((item['ac_in_freq'] ?? 0).toString()) ?? 0.0;
-        line1Points.add(Offset(x, topMargin + chartHeight - (vR / 120.0) * chartHeight));
-        line2Points.add(Offset(x, topMargin + chartHeight - (vS / 120.0) * chartHeight));
-        line3Points.add(Offset(x, topMargin + chartHeight - (freq / 70.0) * chartHeight));
+        line1Points.add(Offset(x, topMargin + chartHeight - (vR / 240.0) * chartHeight));
+        line2Points.add(Offset(x, topMargin + chartHeight - (vS / 240.0) * chartHeight));
       } else if (chartMode == 'overview') {
-        double cap = double.tryParse((item['battery_capacity'] ?? 0).toString()) ?? 0.0;
-        line3Points.add(Offset(x, topMargin + chartHeight - (cap / 100.0) * chartHeight));
+        double batV = double.tryParse((item['battery_voltage'] ?? 0).toString()) ?? 0.0;
+        double batI = double.tryParse((item['battery_current'] ?? 0).toString()) ?? 0.0;
+        double batP = batV * batI;
+        double maxKw = computedMaxKw;
+
+        line4Points.add(Offset(x, clampY(midY - ((batP / 1000.0) / maxKw) * (chartHeight / 2.0))));
       }
     }
 
+    double bottomY = topMargin + chartHeight;
+
     if (chartMode == 'battery') {
-      _drawSmoothCurve(canvas, line1Points, const Color(0xFF0D9488));
-      _drawSmoothCurve(canvas, line2Points, const Color(0xFF7C3AED));
-    } else if (chartMode == 'grid' || chartMode == 'home') {
-      _drawSmoothCurve(canvas, line1Points, const Color(0xFFFF5252));
-      _drawSmoothCurve(canvas, line2Points, const Color(0xFFF97316));
-      _drawSmoothCurve(canvas, line3Points, const Color(0xFF2563EB));
+      _drawSmoothCurve(canvas, line1Points, const Color(0xFF0D9488), bottomY);
+      _drawSmoothCurve(canvas, line2Points, const Color(0xFF7C3AED), midY);
+      
+    // 🎯 修改：更新對應的顏色，加上半透明面積填充  
+    } else if (chartMode == 'grid') {
+      _drawSmoothCurve(canvas, line1Points, const Color(0xFF9E9E9E), bottomY); // 淺灰
+      _drawSmoothCurve(canvas, line2Points, const Color(0xFFE0E0E0), bottomY); // 極淺灰
+      _drawSmoothCurve(canvas, line3Points, const Color(0xFFFF5252), bottomY); // 紅色
+      
+    } else if (chartMode == 'home') {
+      _drawSmoothCurve(canvas, line1Points, const Color(0xFFC4A484), bottomY); // 淺棕
+      _drawSmoothCurve(canvas, line2Points, const Color(0xFFE5D3B3), bottomY); // 極淺棕
+      _drawSmoothCurve(canvas, line3Points, const Color(0xFF2563EB), bottomY); // 藍色
+      
     } else if (chartMode == 'solar') {
-      _drawSmoothCurve(canvas, line1Points, const Color(0xFFF97316));
-      _drawSmoothCurve(canvas, line2Points, const Color(0xFF2563EB));
+      _drawSmoothCurve(canvas, line1Points, const Color(0xFFF97316), bottomY);
+      _drawSmoothCurve(canvas, line2Points, const Color(0xFF2563EB), bottomY);
     } else if (chartMode == 'overview') {
-      _drawSmoothCurve(canvas, line1Points, const Color(0xFF3B82F6));
-      _drawSmoothCurve(canvas, line2Points, const Color(0xFFF59E0B));
-      _drawSmoothCurve(canvas, line3Points, const Color(0xFF10B981));
+      _drawSmoothCurve(canvas, line1Points, const Color(0xFF3B82F6), midY); 
+      _drawSmoothCurve(canvas, line2Points, const Color(0xFFF59E0B), midY); 
+      _drawSmoothCurve(canvas, line3Points, const Color(0xFFFF5252), midY); 
+      _drawSmoothCurve(canvas, line4Points, const Color(0xFF10B981), midY); 
     }
 
-    // 觸控提示 (淺色毛玻璃 + 深色字)
     if (touchPosition != null) {
       double touchX = touchPosition!.dx;
       if (touchX >= leftMargin && touchX <= size.width - rightMargin) {
@@ -343,7 +502,7 @@ class DualAxisPowerChartPainter extends CustomPainter {
           String timeStr = rawTime.length >= 19 ? rawTime.substring(11, 19) : '00:00:00';
 
           double tooltipW = 150.0;
-          double tooltipH = (chartMode == 'solar' || chartMode == 'overview') ? 65.0 : 85.0; 
+          double tooltipH = chartMode == 'overview' ? 105.0 : (chartMode == 'solar' ? 65.0 : 85.0); 
           double tooltipX = (targetX + tooltipW + 10 > size.width) ? targetX - tooltipW - 10 : targetX + 10;
           double tooltipY = topMargin + 10;
           RRect tooltipRRect = RRect.fromRectAndRadius(Rect.fromLTWH(tooltipX, tooltipY, tooltipW, tooltipH), const Radius.circular(8));
@@ -358,19 +517,28 @@ class DualAxisPowerChartPainter extends CustomPainter {
             _drawText(canvas, '電池電流: ${itemData['battery_current'] ?? '--'} A', Offset(tooltipX + 10, tooltipY + 48), Colors.purple.shade700, 10);
             
           } else if (chartMode == 'home') {
-            _drawText(canvas, 'L1輸出電壓: ${itemData['ac_out_v_r'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 26), Colors.red.shade700, 10);
-            _drawText(canvas, 'L2輸出電壓: ${itemData['ac_out_v_s'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 42), Colors.orange.shade800, 10);
+            // 🎯 修改：更新 Tooltip 顏色與輸出功率 (W)
+            _drawText(canvas, 'L1輸出電壓: ${itemData['ac_out_v_r'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 26), const Color(0xFFC4A484), 10);
+            _drawText(canvas, 'L2輸出電壓: ${itemData['ac_out_v_s'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 42), const Color(0xFFE5D3B3), 10);
             
-            String loadP = '--';
-            if (closestIndex < historyInvPs.length) {
-              loadP = historyInvPs[closestIndex]['ac_out_power_percentage']?.toString() ?? '--';
+            String outPower = '--';
+            if (historyInvPs.isNotEmpty) {
+              int idx = closestIndex < historyInvPs.length ? closestIndex : historyInvPs.length - 1;
+              outPower = historyInvPs[idx]['ac_out_total_active_power']?.toString() ?? '--';
             }
-            _drawText(canvas, '負載量: $loadP %', Offset(tooltipX + 10, tooltipY + 58), Colors.blue.shade800, 10);
+            _drawText(canvas, '輸出功率: $outPower W', Offset(tooltipX + 10, tooltipY + 58), const Color(0xFF2563EB), 10);
             
           } else if (chartMode == 'grid') {
-            _drawText(canvas, 'L1輸入電壓: ${itemData['ac_in_v_r'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 26), Colors.red.shade700, 10);
-            _drawText(canvas, 'L2輸入電壓: ${itemData['ac_in_v_s'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 42), Colors.orange.shade800, 10);
-            _drawText(canvas, '市電頻率: ${itemData['ac_in_freq'] ?? '--'} Hz', Offset(tooltipX + 10, tooltipY + 58), Colors.blue.shade800, 10);
+            // 🎯 修改：更新 Tooltip 顏色
+            _drawText(canvas, 'L1輸入電壓: ${itemData['ac_in_v_r'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 26), const Color(0xFF9E9E9E), 10);
+            _drawText(canvas, 'L2輸入電壓: ${itemData['ac_in_v_s'] ?? '--'} V', Offset(tooltipX + 10, tooltipY + 42), const Color(0xFFE0E0E0), 10);
+            
+            String inPower = '--';
+            if (historyInvPs.isNotEmpty) {
+              int idx = closestIndex < historyInvPs.length ? closestIndex : historyInvPs.length - 1;
+              inPower = historyInvPs[idx]['ac_in_total_active_power']?.toString() ?? '--';
+            }
+            _drawText(canvas, '輸入功率: $inPower W', Offset(tooltipX + 10, tooltipY + 58), const Color(0xFFFF5252), 10);
             
           } else if (chartMode == 'solar') {
             _drawText(canvas, 'MPPT 1: ${itemData['solar1_input_power'] ?? '--'} W', Offset(tooltipX + 10, tooltipY + 26), Colors.orange.shade800, 10);
@@ -381,22 +549,36 @@ class DualAxisPowerChartPainter extends CustomPainter {
             double s1 = double.tryParse((itemData['solar1_input_power'] ?? 0).toString()) ?? 0.0;
             double s2 = double.tryParse((itemData['solar2_input_power'] ?? 0).toString()) ?? 0.0;
             
-            String batCap = '--';
-            if (historyTest.isNotEmpty) {
-              int testIdx = closestIndex < historyTest.length ? closestIndex : historyTest.length - 1;
-              batCap = '${historyTest[testIdx]['battery_capacity'] ?? '--'} %';
+            double acIn = 0.0;
+            if (historyInvPs.isNotEmpty) {
+              int idx = closestIndex < historyInvPs.length ? closestIndex : historyInvPs.length - 1;
+              acIn = double.tryParse((historyInvPs[idx]['ac_in_total_active_power'] ?? 0).toString()) ?? 0.0;
+            }
+            
+            double batP = 0.0;
+            if (historyTest.isNotEmpty && line4Points.isNotEmpty) {
+              int bestTestIdx = 0;
+              double minXDiff = double.infinity;
+              for (int i = 0; i < line4Points.length; i++) {
+                double diff = (line4Points[i].dx - targetX).abs();
+                if (diff < minXDiff) { minXDiff = diff; bestTestIdx = i; }
+              }
+              double v = double.tryParse((historyTest[bestTestIdx]['battery_voltage'] ?? 0).toString()) ?? 0.0;
+              double current = double.tryParse((historyTest[bestTestIdx]['battery_current'] ?? 0).toString()) ?? 0.0;
+              batP = v * current;
             }
 
-            _drawText(canvas, '負載: ${load.toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 26), Colors.blue.shade800, 10);
-            _drawText(canvas, '太陽能: ${(s1+s2).toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 42), Colors.orange.shade800, 10);
-            _drawText(canvas, '電池: $batCap', Offset(tooltipX + 10, tooltipY + 58), Colors.teal.shade800, 10);
+            _drawText(canvas, '電網: ${acIn.toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 26), const Color(0xFFFF5252), 10);
+            _drawText(canvas, '負載: ${load.toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 42), const Color(0xFF3B82F6), 10);
+            _drawText(canvas, '太陽能: ${(s1+s2).toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 58), const Color(0xFFF59E0B), 10);
+            _drawText(canvas, '電池: ${batP.toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 74), const Color(0xFF10B981), 10);
           }
         }
       }
     }
   }
 
-  void _drawSmoothCurve(Canvas canvas, List<Offset> points, Color color) {
+  void _drawSmoothCurve(Canvas canvas, List<Offset> points, Color color, double baselineY) {
     if (points.isEmpty) return;
     Path path = Path()..moveTo(points.first.dx, points.first.dy);
     for (int i = 0; i < points.length - 1; i++) {
@@ -405,7 +587,20 @@ class DualAxisPowerChartPainter extends CustomPainter {
       path.quadraticBezierTo(points[i].dx, points[i].dy, xc, yc);
     }
     path.lineTo(points.last.dx, points.last.dy);
-    canvas.drawPath(path, Paint()..color = color..strokeWidth = 1.2..style = PaintingStyle.stroke..strokeCap = StrokeCap.round);
+
+    // 繪製半透明面積填充
+    Path fillPath = Path.from(path);
+    fillPath.lineTo(points.last.dx, baselineY);
+    fillPath.lineTo(points.first.dx, baselineY);
+    fillPath.close();
+
+    Paint fillPaint = Paint()
+      ..color = color.withValues(alpha: 0.15) 
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(fillPath, fillPaint);
+
+    // 繪製曲線本體
+    canvas.drawPath(path, Paint()..color = color..strokeWidth = 1.5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round);
   }
 
   void _drawText(Canvas canvas, String text, Offset offset, Color color, double fontSize) {
@@ -417,7 +612,6 @@ class DualAxisPowerChartPainter extends CustomPainter {
   bool shouldRepaint(covariant DualAxisPowerChartPainter oldDelegate) => true;
 }
 
-// 📊 全新：專門用於繪製每日收益的長條圖 Painter
 class SavingsBarChartPainter extends CustomPainter {
   final List<Map<String, dynamic>> savingsData;
   final Offset? touchPosition;
@@ -439,9 +633,8 @@ class SavingsBarChartPainter extends CustomPainter {
     final double chartWidth = size.width - leftMargin - rightMargin;
     final double chartHeight = size.height - topMargin - bottomMargin;
 
-    Paint gridPaint = Paint()..color = Colors.grey[200]!..strokeWidth = 1.0;
+    Paint gridPaint = Paint()..color = Colors.grey.withValues(alpha: 0.15)..strokeWidth = 1.0;
 
-    // 繪製 Y 軸網格與標籤 (NT$)
     for (int i = 0; i <= 4; i++) {
       double y = topMargin + (chartHeight / 4.0) * i;
       canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), gridPaint);
@@ -449,13 +642,11 @@ class SavingsBarChartPainter extends CustomPainter {
       _drawText(canvas, val.toStringAsFixed(1), Offset(0, y - 6), Colors.black38, 9);
     }
 
-    // 繪製 X 軸時間標籤 (每 4 小時一個刻度)
     for (int i = 0; i <= 24; i += 4) {
       double x = leftMargin + (chartWidth / 24.0) * i;
       _drawText(canvas, '${i.toString().padLeft(2, '0')}:00', Offset(x - 12, topMargin + chartHeight + 8), Colors.black38, 9);
     }
 
-    // 繪製長條圖
     double barWidth = (chartWidth / 24.0) * 0.6; 
     
     for (var item in savingsData) {
@@ -465,7 +656,7 @@ class SavingsBarChartPainter extends CustomPainter {
 
       double x = leftMargin + (chartWidth / 24.0) * hour + (chartWidth / 24.0) / 2.0;
       double barH = (saved / maxSavings) * chartHeight;
-      if (barH < 2 && saved > 0) barH = 2.0; // 賦予最小高度
+      if (barH < 2 && saved > 0) barH = 2.0;
 
       Color barColor = Colors.teal.shade300;
       if (period == '尖峰') barColor = Colors.redAccent.shade200;
@@ -478,7 +669,6 @@ class SavingsBarChartPainter extends CustomPainter {
       canvas.drawRRect(barRect, Paint()..color = barColor);
     }
 
-    // 互動觸控提示框 (Tooltip)
     if (touchPosition != null) {
       double touchX = touchPosition!.dx;
       if (touchX >= leftMargin && touchX <= size.width - rightMargin) {
@@ -490,7 +680,6 @@ class SavingsBarChartPainter extends CustomPainter {
           var item = hoveredItem.first;
           double targetX = leftMargin + (chartWidth / 24.0) * hoveredHour + (chartWidth / 24.0) / 2.0;
           
-          // 畫出半透明的提示底色
           canvas.drawLine(Offset(targetX, topMargin), Offset(targetX, topMargin + chartHeight), Paint()..color = Colors.teal.withValues(alpha: 0.15)..strokeWidth = barWidth * 1.5);
 
           double tooltipW = 110.0;

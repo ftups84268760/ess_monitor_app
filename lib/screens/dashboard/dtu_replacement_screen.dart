@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '/screens/scanner_screen.dart'; // 請確認此路徑與您專案中掃描器的路徑一致
+import '/screens/scanner_screen.dart'; 
 
 class DtuReplacementScreen extends StatefulWidget {
   final String deviceDbId;
@@ -26,6 +26,9 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
   bool _isLoading = false;
   String _currentDtuSn = '載入中...';
   String _statusText = '';
+  
+  // 🎯 新增：紀錄是否正在測試連線中
+  bool _isPinging = false; 
 
   @override
   void initState() {
@@ -33,7 +36,6 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
     _fetchCurrentDtu();
   }
 
-  // 🎯 查詢目前的 DTU 序號
   Future<void> _fetchCurrentDtu() async {
     try {
       final response = await Supabase.instance.client
@@ -57,8 +59,6 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
     }
   }
 
-  // 🎯 呼叫相機掃描 QR Code
-  // 🎯 呼叫相機掃描 QR Code
   Future<void> _scanQRCode() async {
     final String? scannedCode = await Navigator.push(
       context,
@@ -69,10 +69,9 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
       String cleanedCode = scannedCode.trim();
       String upperCode = cleanedCode.toUpperCase();
       
-      // 🎯 整合新舊規則：精準擷取 "SN:" 後面的字串
       if (upperCode.contains('SN:')) {
-        int startIndex = upperCode.indexOf('SN:') + 3; // 找到 SN: 結束的位置
-        int endIndex = upperCode.indexOf(',', startIndex); // 找看看後面有沒有逗號
+        int startIndex = upperCode.indexOf('SN:') + 3; 
+        int endIndex = upperCode.indexOf(',', startIndex); 
         
         if (endIndex == -1) {
           cleanedCode = cleanedCode.substring(startIndex).trim();
@@ -88,13 +87,50 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
     }
   }
 
-  void _showSnackBar(String message, {Color color = Colors.teal}) {
+  void _showSnackBar(String message, {Color color = Colors.orangeAccent}) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message, style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)), backgroundColor: color));
     }
   }
 
-  // 🎯 核心通訊技術：UDP 發送 AT 指令 (直接移植自 W410sProvisioningScreen)
+  // 🎯 新增：DTU 連線測試功能 (移植自設備新增註冊頁面)
+  Future<void> _testDtuConnection() async {
+    final ip = _newDtuIpController.text.trim();
+    if (ip.isEmpty) {
+      _showSnackBar('請先輸入 DTU IP', color: Colors.redAccent);
+      return;
+    }
+
+    setState(() { _isPinging = true; });
+
+    try {
+      bool isOnline = false;
+      
+      // 方法一：嘗試對 Port 80 建立 TCP 連線
+      try {
+        final socket = await Socket.connect(ip, 80, timeout: const Duration(seconds: 2));
+        isOnline = true;
+        socket.destroy();
+      } catch (_) {
+        // 方法二：使用系統內建的 ICMP Ping 指令
+        try {
+          final result = await Process.run('ping', ['-c', '1', '-W', '2', ip]);
+          if (result.exitCode == 0) isOnline = true;
+        } catch (_) {}
+      }
+
+      if (mounted) {
+        if (isOnline) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ DTU連線測試成功', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)), backgroundColor: Colors.orangeAccent));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ 連線測試失敗，請確認手機與DTU是否在相同網路區段'), backgroundColor: Colors.redAccent));
+        }
+      }
+    } finally {
+      if (mounted) setState(() { _isPinging = false; });
+    }
+  }
+
   Future<bool> _configureNewDtuViaUDP(String ip, String inverterSn) async {
     RawDatagramSocket? udpSocket;
     StreamSubscription? subscription; 
@@ -193,24 +229,22 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
     }
   }
 
-  // 🎯 執行完整換機流程
   Future<void> _submitReplacement() async {
     final newDtuSn = _newDtuSnController.text.trim();
     final newDtuIp = _newDtuIpController.text.trim();
     
     if (newDtuSn.isEmpty || newDtuIp.isEmpty) {
-      _showSnackBar('請輸入新模組的序號與 IP', color: Colors.orange);
+      _showSnackBar('請輸入新模組的序號與 IP');
       return;
     }
     if (newDtuSn == _currentDtuSn) {
-      _showSnackBar('新序號不可與舊序號相同', color: Colors.orange);
+      _showSnackBar('新序號不可與舊序號相同');
       return;
     }
 
     setState(() { _isLoading = true; _statusText = '檢查綁定衝突...'; });
 
     try {
-      // 1. 衝突檢查
       final checkExist = await Supabase.instance.client
           .from('devices')
           .select('id')
@@ -221,10 +255,8 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
         throw '此DTU序號已被其他設備綁定！';
       }
 
-      // 2. 透過 UDP 寫入 Topic 至新 DTU
       await _configureNewDtuViaUDP(newDtuIp, widget.inverterSn);
 
-      // 3. 雲端資料庫更新替換
       setState(() => _statusText = '更新雲端資料庫...');
       await Supabase.instance.client
           .from('devices')
@@ -237,22 +269,22 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Colors.grey[850],
           title: const Row(
             children: [
-              Icon(Icons.check_circle, color: Colors.teal),
+              Icon(Icons.check_circle, color: Colors.orangeAccent),
               SizedBox(width: 8),
-              Text('模組更換成功', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text('模組更換成功', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
             ],
           ),
-          content: Text('已成功將設備綁定至新模組\nDTU: $newDtuSn'),
+          content: Text('已成功將設備綁定至新模組\nDTU: $newDtuSn', style: const TextStyle(color: Colors.white70)),
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.pop(context); // 關閉對話框
-                Navigator.pop(context); // 回到總覽
+                Navigator.pop(context); 
+                Navigator.pop(context); 
               },
-              child: const Text('完成', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+              child: const Text('完成', style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -275,13 +307,13 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: Colors.grey[900], 
       appBar: AppBar(
-        title: const Text('通訊模組(DTU)更換', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
+        title: const Text('通訊模組(DTU)更換', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.grey[850], 
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87),
+          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -291,9 +323,9 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const CircularProgressIndicator(color: Colors.orange),
+                  const CircularProgressIndicator(color: Colors.orangeAccent),
                   const SizedBox(height: 16),
-                  Text(_statusText, style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                  Text(_statusText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ],
               ),
             )
@@ -306,40 +338,41 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Colors.grey[850], 
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
+                      border: Border.all(color: Colors.grey[800]!),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('逆變器序號(SN)', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        const Text('逆變器序號(SN)', style: TextStyle(fontSize: 12, color: Colors.white54)),
                         const SizedBox(height: 4),
-                        Text(widget.inverterSn, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        Text(widget.inverterSn, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 12.0),
-                          child: Divider(height: 1, color: Colors.black12),
+                          child: Divider(height: 1, color: Colors.white10),
                         ),
-                        const Text('原有DTU序號(SN)', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        const Text('原有DTU序號(SN)', style: TextStyle(fontSize: 12, color: Colors.white54)),
                         const SizedBox(height: 4),
-                        Text(_currentDtuSn, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black45)),
+                        Text(_currentDtuSn, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white70)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 20),
 
-                  const Text('新更換DTU模組資訊', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+                  const Text('新更換DTU模組資訊', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _newDtuSnController,
-                    style: const TextStyle(fontSize: 14),
+                    style: const TextStyle(fontSize: 14, color: Colors.white),
                     decoration: InputDecoration(
                       labelText: 'DTU序號(SN)',
+                      labelStyle: const TextStyle(color: Colors.white54),
                       filled: true,
-                      fillColor: Colors.white,
-                      prefixIcon: const Icon(Icons.qr_code, color: Colors.orange),
+                      fillColor: Colors.grey[800], 
+                      prefixIcon: const Icon(Icons.qr_code, color: Colors.orangeAccent),
                       suffixIcon: IconButton(
-                        icon: const Icon(Icons.camera_alt, color: Colors.black38),
+                        icon: const Icon(Icons.camera_alt, color: Colors.white70),
                         onPressed: _scanQRCode,
                       ),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
@@ -349,14 +382,35 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
                   TextField(
                     controller: _newDtuIpController,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    style: const TextStyle(fontSize: 14),
+                    style: const TextStyle(fontSize: 14, color: Colors.white),
                     decoration: InputDecoration(
                       labelText: 'DTU IP',
+                      labelStyle: const TextStyle(color: Colors.white54),
                       hintText: '請先將手機與DTU在同一網路區段',
+                      hintStyle: const TextStyle(color: Colors.white30),
                       filled: true,
-                      fillColor: Colors.white,
-                      prefixIcon: const Icon(Icons.router, color: Colors.orange),
+                      fillColor: Colors.grey[800],
+                      prefixIcon: const Icon(Icons.router, color: Colors.orangeAccent),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  
+                  // 🎯 新增這段：右下角的 DTU 連線測試按鈕
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orangeAccent,
+                        side: const BorderSide(color: Colors.orangeAccent),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      onPressed: _isPinging ? null : _testDtuConnection,
+                      icon: _isPinging 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.orangeAccent, strokeWidth: 2))
+                          : const Icon(Icons.wifi_find_rounded, size: 18),
+                      label: Text(_isPinging ? '測試中...' : 'DTU連線測試', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                     ),
                   ),
                   
@@ -367,12 +421,13 @@ class _DtuReplacementScreenState extends State<DtuReplacementScreen> {
                     height: 48,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        backgroundColor: Colors.orangeAccent,
+                        foregroundColor: Colors.black87,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         elevation: 0,
                       ),
                       onPressed: _submitReplacement,
-                      child: const Text('模組更換', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                      child: const Text('模組更換', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],

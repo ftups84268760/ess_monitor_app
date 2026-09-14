@@ -1,3 +1,4 @@
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dashboard/inner_dashboard.dart';
@@ -81,21 +82,18 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     }
   }
 
-  // 🎯 新增：切換被分享者的推播開關
   Future<void> _toggleSharedPushNotification(String deviceId, bool currentValue) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
     try {
-      // 🎯 1. 將 deviceId 轉為 int，並加上 .select() 以確保有更新到資料
       final response = await Supabase.instance.client
           .from('device_shares')
           .update({'allow_notifications': !currentValue})
-          .eq('device_id', int.parse(deviceId)) // 確保是整數
+          .eq('device_id', int.parse(deviceId)) 
           .eq('shared_to_user_id', user.id)
           .select();
 
-      // 🎯 2. 檢查是否真的有更新到資料行
       if (response.isEmpty) {
         throw Exception('找不到對應的分享授權紀錄，或無權限修改');
       }
@@ -138,7 +136,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('修改逆變器名稱', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('修改逆變器名稱', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
         content: TextField(
           controller: _nameInputController,
           decoration: const InputDecoration(
@@ -165,7 +165,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                 debugPrint('設備改名失敗: $e');
               }
             },
-            child: const Text('儲存修改', style: TextStyle(color: Colors.teal)),
+            child: const Text('儲存修改', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
           )
         ],
       ),
@@ -183,7 +183,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('刪除設備失敗，請檢查雲端連線')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('刪除設備失敗，請檢查雲端連線'), backgroundColor: Colors.redAccent));
       }
     }
   }
@@ -208,8 +208,11 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           ),
           selected: isSelected,
           selectedColor: Colors.teal,
-          backgroundColor: Colors.grey[100],
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: isSelected ? Colors.teal : Colors.grey.shade200)
+          ),
           showCheckmark: false,
           onSelected: (bool selected) {
             if (selected) {
@@ -236,12 +239,32 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin' || widget.accountType == '系統管理員(root)';
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.white, 
       appBar: AppBar(
         title: const Text('我的設備列表', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline, color: Colors.teal),
+            tooltip: '新增註冊設備',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const W410sProvisioningScreen(), 
+                ),
+              );
+              _reloadDeviceList();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.get_app_rounded, color: Colors.teal), 
+            tooltip: '輸入驗證碼接收設備',
+            onPressed: () {
+              showReceiveDeviceDialog(context, _reloadDeviceList);
+            },
+          ),
           IconButton(
             icon: Icon(_isAscending ? Icons.sort_by_alpha : Icons.sort, color: Colors.teal),
             onPressed: () {
@@ -252,50 +275,38 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           )
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.teal, 
-        onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const W410sProvisioningScreen(), 
-            ),
-          );
-          _reloadDeviceList();
-        },
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (val) { setState(() {}); },
-              style: const TextStyle(fontSize: 13),
-              decoration: InputDecoration(
-                hintText: isAdmin ? '搜尋逆變器名稱、序號、地點或擁有者信箱...' : '搜尋逆變器名稱、序號、安裝地點...',
-                hintStyle: const TextStyle(color: Colors.black38, fontSize: 12),
-                prefixIcon: const Icon(Icons.search_rounded, color: Colors.teal, size: 20),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 16, color: Colors.black38),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {});
-                        },
-                      )
-                    : null,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                filled: true,
-                fillColor: const Color(0xFFF7F8F9),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey[200]!),
+            child: Container(
+              decoration: BoxDecoration(
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))]
+              ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) { setState(() {}); },
+                style: const TextStyle(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: isAdmin ? '搜尋逆變器名稱、序號、地點或擁有者信箱...' : '搜尋逆變器名稱、序號、安裝地點...',
+                  hintStyle: const TextStyle(color: Colors.black38, fontSize: 12),
+                  prefixIcon: const Icon(Icons.search_rounded, color: Colors.teal, size: 20),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16, color: Colors.black38),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {});
+                          },
+                        )
+                      : null,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
             ),
@@ -311,7 +322,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
               ],
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
 
           Expanded(
             child: RefreshIndicator(
@@ -366,7 +377,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                   }
 
                   return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     itemCount: displayList.length,
                     itemBuilder: (context, index) {
                       final device = displayList[index];
@@ -375,179 +386,214 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                       
                       final bool isOwner = device['user_id'] == currentUserId;
 
-                      Widget deviceCard = Card(
+                      Widget deviceCard = Container(
                         key: ValueKey(deviceId),
-                        color: Colors.white,
-                        elevation: 2,
-                        margin: EdgeInsets.only(bottom: isOwner ? 0 : 10), 
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(color: Colors.grey[200]!)
+                        margin: EdgeInsets.only(bottom: isOwner ? 0 : 16), 
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
                         ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          leading: Stack(
-                            children: [
-                              Container(
-                                width: 48,
-                                height: 48,
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: online ? Colors.teal.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
-                                    width: 1.5,
+                        child: Material( 
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => InnerDashboardNavigation(
+                                    customInverterName: device['name'] ?? '未命名設備',
+                                    isInverterOnline: online,
+                                    deviceDbId: deviceId,
+                                    inverterSn: device['sn']?.toString() ?? '未設定', 
+                                    accountType: widget.accountType,
                                   ),
                                 ),
-                                child: Image.asset(
-                                  'assets/images/inverter_icon.png',
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (context, error, stackTrace) => const Icon(
-                                    Icons.developer_board_rounded,
-                                    color: Colors.teal,
-                                    size: 28
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 2, right: 2,
-                                child: Container(
-                                  width: 9, height: 9,
-                                  decoration: BoxDecoration(
-                                    color: online ? Colors.green : Colors.red,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: (online ? Colors.green : Colors.red).withValues(alpha: 0.5),
-                                        blurRadius: 4,
-                                        spreadRadius: 1,
+                              );
+                              _reloadDeviceList();
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Stack(
+                                    children: [
+                                      Container(
+                                        width: 52,
+                                        height: 52,
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey[50],
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: online ? Colors.teal.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                                            width: 1.5,
+                                          ),
+                                        ),
+                                        child: Image.asset(
+                                          'assets/images/inverter_icon.png',
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (context, error, stackTrace) => const Icon(
+                                            Icons.developer_board_rounded,
+                                            color: Colors.teal,
+                                            size: 28
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: 2, right: 2,
+                                        child: Container(
+                                          width: 10, height: 10,
+                                          decoration: BoxDecoration(
+                                            color: online ? Colors.green : Colors.red,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: (online ? Colors.green : Colors.red).withValues(alpha: 0.5),
+                                                blurRadius: 4,
+                                                spreadRadius: 1,
+                                              )
+                                            ],
+                                          ),
+                                        ),
                                       )
                                     ],
                                   ),
-                                ),
-                              )
-                            ],
-                          ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(device['name'] ?? '未命名設備', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis)
-                                    ),
-                                    if (!isOwner) ...[
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(color: Colors.orangeAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
-                                        child: const Text('來自共享', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
-                                      )
-                                    ]
-                                  ],
-                                ),
-                              ),
-                              if (isOwner) ...[
-                                IconButton(
-                                  icon: const Icon(Icons.share, size: 16, color: Colors.teal),
-                                  constraints: const BoxConstraints(),
-                                  padding: const EdgeInsets.all(6),
-                                  onPressed: () => _showManageSharesModal(deviceId, device['name'] ?? ''),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.edit, size: 16, color: Colors.black26),
-                                  constraints: const BoxConstraints(),
-                                  padding: const EdgeInsets.all(6),
-                                  onPressed: () => _editDeviceNameDialog(deviceId, device['name'] ?? ''),
-                                )
-                              ]
-                            ],
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('INV: ${device['sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
-                              Text('DTU: ${device['dtu_sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
-                              
-                              // 🎯 修改：如果是管理員，且「不是」root，才顯示擁有者資訊
-                              if (isAdmin) ...[
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.person_pin_circle, size: 12, color: Colors.orange),
-                                    const SizedBox(width: 2),
-                                    Expanded(
-                                      child: Text(
-                                        '擁有者: ${device['owner_email'] ?? device['user_id'] ?? '未知'}',
-                                        style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(Icons.location_on_outlined, size: 12, color: Colors.teal),
-                                  const SizedBox(width: 2),
+                                  const SizedBox(width: 16),
                                   Expanded(
-                                    child: Text(
-                                      '${device['address'] ?? '尚未設定'}',
-                                      style: TextStyle(
-                                        color: (device['address'] == '尚未設定' || device['address'] == null) ? Colors.orangeAccent : Colors.teal,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(device['name'] ?? '未命名設備', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 15), overflow: TextOverflow.ellipsis)
+                                            ),
+                                            if (!isOwner) ...[
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(color: Colors.orangeAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                                                child: const Text('來自共享', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
+                                              )
+                                            ]
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        
+                                        FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.centerLeft,
+                                          child: Text('INV: ${device['sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w500)),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.centerLeft,
+                                          child: Text('DTU: ${device['dtu_sn'] ?? ''}', style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w500)),
+                                        ),
+                                        
+                                        if (isAdmin) ...[
+                                          const SizedBox(height: 6),
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.center,
+                                            children: [
+                                              const Icon(Icons.person_pin_circle, size: 14, color: Colors.orange),
+                                              const SizedBox(width: 4),
+                                              // 🎯 替換：運用 FittedBox 讓擁有者信箱過長時能完整呈現在同一行
+                                              Expanded(
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  alignment: Alignment.centerLeft,
+                                                  child: Text(
+                                                    '擁有者: ${device['owner_email'] ?? device['user_id'] ?? '未知'}',
+                                                    style: const TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
+                                                    maxLines: 1,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                        
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.location_on_outlined, size: 14, color: Colors.teal),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                '${device['address'] ?? '尚未設定'}',
+                                                style: TextStyle(
+                                                  color: (device['address'] == '尚未設定' || device['address'] == null) ? Colors.orangeAccent : Colors.teal,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      if (isOwner)
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            InkWell(
+                                              borderRadius: BorderRadius.circular(20),
+                                              onTap: () => _showManageSharesModal(deviceId, device['name'] ?? ''),
+                                              child: const Padding(
+                                                padding: EdgeInsets.all(6.0),
+                                                child: Icon(Icons.share, size: 18, color: Colors.teal),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            InkWell(
+                                              borderRadius: BorderRadius.circular(20),
+                                              onTap: () => _editDeviceNameDialog(deviceId, device['name'] ?? ''),
+                                              child: const Padding(
+                                                padding: EdgeInsets.all(6.0),
+                                                child: Icon(Icons.edit, size: 18, color: Colors.black26),
+                                              ),
+                                            )
+                                          ],
+                                        )
+                                      else
+                                        IconButton(
+                                          icon: Icon(
+                                            (device['allow_notifications'] == true) ? Icons.notifications_active : Icons.notifications_off_outlined,
+                                            color: (device['allow_notifications'] == true) ? Colors.teal : Colors.black38,
+                                            size: 22,
+                                          ),
+                                          constraints: const BoxConstraints(),
+                                          padding: const EdgeInsets.all(4),
+                                          onPressed: () => _toggleSharedPushNotification(deviceId, device['allow_notifications'] == true),
+                                        ),
+                                      const Padding(
+                                        padding: EdgeInsets.only(top: 24.0, right: 8.0),
+                                        child: Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 16),
+                                      ),
+                                    ],
+                                  )
                                 ],
                               ),
-                            ],
+                            ),
                           ),
-                          // 🎯 加入被分享者的推播開關 UI
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (!isOwner)
-                                IconButton(
-                                  icon: Icon(
-                                    (device['allow_notifications'] == true) ? Icons.notifications_active : Icons.notifications_off_outlined,
-                                    color: (device['allow_notifications'] == true) ? Colors.teal : Colors.black38,
-                                    size: 22,
-                                  ),
-                                  padding: const EdgeInsets.only(right: 8),
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () => _toggleSharedPushNotification(deviceId, device['allow_notifications'] == true),
-                                ),
-                              const Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 14),
-                            ],
-                          ),
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => InnerDashboardNavigation(
-                                  customInverterName: device['name'] ?? '未命名設備',
-                                  isInverterOnline: online,
-                                  deviceDbId: deviceId,
-                                  inverterSn: device['sn']?.toString() ?? '未設定', 
-                                  accountType: widget.accountType,
-                                ),
-                              ),
-                            );
-                            _reloadDeviceList();
-                          },
                         ),
                       );
 
                       if (isOwner) {
                         return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.only(bottom: 16), 
                           child: Dismissible(
                             key: ValueKey('dismiss_$deviceId'),
                             direction: DismissDirection.endToStart,
@@ -556,23 +602,32 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                               padding: const EdgeInsets.only(right: 20.0),
                               decoration: BoxDecoration(
                                 color: Colors.redAccent,
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(16),
                               ),
-                              child: const Icon(Icons.delete_sweep, color: Colors.white, size: 28),
+                              child: const Icon(Icons.delete_sweep, color: Colors.white, size: 32),
                             ),
                             confirmDismiss: (direction) async {
                               return await showDialog(
                                 context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('移除設備確認', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  content: Text('確定要將 「${device['name']}」 從雲端伺服器中永久移除嗎？\n(包含所有授權分享將一併失效)'),
-                                  actions: [
-                                    TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-                                    TextButton(
-                                      onPressed: () => Navigator.of(context).pop(true),
-                                      child: const Text('確定移除', style: TextStyle(color: Colors.red)),
-                                    )
-                                  ],
+                                builder: (context) => BackdropFilter(
+                                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                  child: AlertDialog(
+                                    backgroundColor: Colors.black.withValues(alpha: 0.6),
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.3), width: 1.5),
+                                    ),
+                                    title: const Text('移除設備確認', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                                    content: Text('確定要將 「${device['name']}」 從雲端伺服器中永久移除嗎？\n(包含所有授權分享將一併失效)', style: const TextStyle(color: Colors.white70, height: 1.5, fontSize: 13)),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(true),
+                                        child: const Text('確定移除', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                                      )
+                                    ],
+                                  ),
                                 ),
                               );
                             },
@@ -673,13 +728,22 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
   Future<void> _removeShare(String shareId, String email) async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('移除授權確認', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('確定要取消分享給 $email 嗎？\n對方將立即失去檢視此設備的權限。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('確定移除', style: TextStyle(color: Colors.red))),
-        ],
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.black.withValues(alpha: 0.6),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.3), width: 1.5),
+          ),
+          title: const Text('移除授權確認', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+          content: Text('確定要取消分享給 $email 嗎？\n對方將立即失去檢視此設備的權限。', style: const TextStyle(color: Colors.white70, height: 1.5, fontSize: 13)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('確定移除', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold))),
+          ],
+        ),
       )
     );
 
@@ -706,7 +770,7 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
       height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -728,12 +792,12 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
                   keyboardType: TextInputType.emailAddress,
                   style: const TextStyle(fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: '請輸入欲分享設備的帳號電子信箱',
+                    hintText: '請輸入欲分享設備的帳號(電子信箱)',
                     hintStyle: const TextStyle(fontSize: 13, color: Colors.black38),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                     filled: true,
                     fillColor: Colors.grey[100],
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                 ),
               ),
@@ -741,7 +805,7 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.teal,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   elevation: 0
                 ),
@@ -754,12 +818,12 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
           ),
           
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16.0),
+            padding: EdgeInsets.symmetric(vertical: 20.0),
             child: Divider(height: 1, color: Colors.black12),
           ),
           
-          const Text('已授權的帳號', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)),
-          const SizedBox(height: 10),
+          const Text('已授權的帳號', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const SizedBox(height: 12),
 
           Expanded(
             child: _isLoading
@@ -771,20 +835,21 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
                     itemBuilder: (context, index) {
                       final share = _sharedUsers[index];
                       return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey[200]!)
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))]
                         ),
                         child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                           leading: CircleAvatar(
-                            backgroundColor: Colors.teal.shade50,
+                            backgroundColor: Colors.teal.withValues(alpha: 0.1),
                             child: const Icon(Icons.person, color: Colors.teal),
                           ),
-                          title: Text(share['nickname'] ?? '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                          subtitle: Text(share['email'] ?? '', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                          title: Text(share['nickname'] ?? '', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+                          subtitle: Text(share['email'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.black54)),
                           trailing: IconButton(
                             icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
                             onPressed: () => _removeShare(share['share_id'], share['email']),
@@ -798,4 +863,96 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
       ),
     );
   }
+}
+
+void showReceiveDeviceDialog(BuildContext context, VoidCallback onSuccessRefresh) {
+  final TextEditingController codeController = TextEditingController();
+  bool isProcessing = false;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setState) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: AlertDialog(
+            backgroundColor: Colors.black.withValues(alpha: 0.6),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.get_app_rounded, color: Colors.tealAccent),
+                SizedBox(width: 8),
+                Text('接收設備', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('請輸入原設備擁有者提供給您的 6 位數接收碼。', style: TextStyle(fontSize: 13, color: Colors.white70)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: codeController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 8, color: Colors.tealAccent),
+                  decoration: const InputDecoration(
+                    counterText: "",
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
+                child: const Text('取消', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                onPressed: isProcessing 
+                  ? null 
+                  : () async {
+                      final code = codeController.text.trim();
+                      if (code.length != 6) return;
+
+                      setState(() => isProcessing = true);
+
+                      try {
+                        final response = await Supabase.instance.client.rpc(
+                          'accept_device_transfer',
+                          params: {'p_code': code},
+                        );
+
+                        if (!dialogContext.mounted) return;
+
+                        if (response['success'] == true) {
+                          Navigator.pop(dialogContext); 
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
+                          onSuccessRefresh(); 
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+                          setState(() => isProcessing = false);
+                        }
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('連線異常，請稍後再試。'), backgroundColor: Colors.redAccent));
+                          setState(() => isProcessing = false);
+                        }
+                      }
+                    },
+                child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.black87, strokeWidth: 2)) : const Text('確認接收', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+        );
+      }
+    )
+  );
 }

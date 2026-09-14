@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart'; 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// 🎯 定義 TOU 時段的資料結構，並加入 JSON 轉換能力
 class TouPeriod {
-  final int a; // 0: 非夏月/全年, 1: 夏月
-  final int b; // 0: 第一組, 1: 第二組
-  int state;   // 0: 關閉, 1: 充電, 2: 放電
+  final int a; 
+  final int b; 
+  int state;   
   TimeOfDay startTime;
   TimeOfDay endTime;
 
@@ -17,14 +17,12 @@ class TouPeriod {
     this.endTime = const TimeOfDay(hour: 0, minute: 0),
   });
 
-  // 轉換為硬體指令格式
   String toCommandString() {
     final start = '${startTime.hour.toString().padLeft(2, '0')}${startTime.minute.toString().padLeft(2, '0')}';
     final end = '${endTime.hour.toString().padLeft(2, '0')}${endTime.minute.toString().padLeft(2, '0')}';
     return '^S019TOU$a,$b,$state,$start,$end\r';
   }
 
-  // 轉換為 JSON 以便存入資料庫
   Map<String, dynamic> toJson() {
     return {
       'state': state,
@@ -33,7 +31,6 @@ class TouPeriod {
     };
   }
 
-  // 從資料庫 JSON 讀取設定
   void loadFromJson(Map<String, dynamic>? json) {
     if (json == null) return;
     if (json['state'] != null) state = json['state'];
@@ -50,7 +47,7 @@ class TouPeriod {
 
 class TouSettingsScreen extends StatefulWidget {
   final String deviceDbId;
-  final bool isRootOrOwner; // 🎯 接收權限參數
+  final bool isRootOrOwner; 
 
   const TouSettingsScreen({
     super.key, 
@@ -66,12 +63,10 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
   bool _isLoading = true;            
   bool _isSending = false;           
 
-  // 季節模式與月份設定
   bool _isSeasonModeEnabled = false; 
   int _summerStartMonth = 6;         
   int _summerEndMonth = 9;           
 
-  // 預先實例化 4 組設定
   final TouPeriod _summerSlot0 = TouPeriod(a: 1, b: 0);
   final TouPeriod _summerSlot1 = TouPeriod(a: 1, b: 1);
   final TouPeriod _winterSlot0 = TouPeriod(a: 0, b: 0);
@@ -83,7 +78,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     _fetchTouSettings(); 
   }
 
-  // 🎯 從 Supabase 讀取現有設定
   Future<void> _fetchTouSettings() async {
     try {
       if (widget.deviceDbId.isEmpty) return;
@@ -116,7 +110,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     }
   }
 
-  // 動態回傳運行狀態說明
   String _getStateDescription(int state) {
     switch (state) {
       case 0:
@@ -130,34 +123,62 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     }
   }
 
-  // 呼叫系統原生的時間選擇器
   Future<void> _selectTime(BuildContext context, TouPeriod period, bool isStart) async {
     final TimeOfDay initialTime = isStart ? period.startTime : period.endTime;
-    final TimeOfDay? picked = await showTimePicker(
+    DateTime tempTime = DateTime(2020, 1, 1, initialTime.hour, initialTime.minute);
+
+    await showCupertinoModalPopup(
       context: context,
-      initialTime: initialTime,
-      initialEntryMode: TimePickerEntryMode.inputOnly, 
-      helpText: '時間範圍：00:00~23:59',
-      builder: (context, child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-          child: child!,
+      builder: (BuildContext builderContext) {
+        return Container(
+          height: 260,
+          color: Colors.white,
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  CupertinoButton(
+                    child: const Text('取消', style: TextStyle(color: Colors.grey)),
+                    onPressed: () => Navigator.of(builderContext).pop(),
+                  ),
+                  CupertinoButton(
+                    child: const Text('確定', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+                    onPressed: () {
+                      if (mounted) {
+                        setState(() {
+                          if (isStart) {
+                            period.startTime = TimeOfDay(hour: tempTime.hour, minute: tempTime.minute);
+                          } else {
+                            period.endTime = TimeOfDay(hour: tempTime.hour, minute: tempTime.minute);
+                          }
+                        });
+                      }
+                      Navigator.of(builderContext).pop();
+                    },
+                  ),
+                ],
+              ),
+              Expanded(
+                child: SafeArea(
+                  top: false,
+                  child: CupertinoDatePicker(
+                    mode: CupertinoDatePickerMode.time,
+                    use24hFormat: true,
+                    initialDateTime: tempTime,
+                    onDateTimeChanged: (DateTime newTime) {
+                      tempTime = newTime;
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
-
-    if (picked != null && mounted) {
-      setState(() {
-        if (isStart) {
-          period.startTime = picked;
-        } else {
-          period.endTime = picked;
-        }
-      });
-    }
   }
 
-  // 🎯 執行批次發送並將設定存入 Supabase
   Future<void> _sendBatchCommands() async {
     if (widget.deviceDbId.isEmpty) return;
     
@@ -165,13 +186,11 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
 
     List<String> commandsToDeploy = [];
 
-    // 1. 組裝 ^S011DST 指令
     final int dstState = _isSeasonModeEnabled ? 1 : 0;
     final String bb = _summerStartMonth.toString().padLeft(2, '0');
     final String cc = _summerEndMonth.toString().padLeft(2, '0');
     commandsToDeploy.add('^S011DST$dstState,$bb,$cc\r');
 
-    // 2. 組裝 ^S019TOU 指令群
     if (_isSeasonModeEnabled) {
       commandsToDeploy.add(_summerSlot0.toCommandString());
       commandsToDeploy.add(_summerSlot1.toCommandString());
@@ -183,7 +202,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     }
 
     try {
-      // 3. 準備寫入資料庫的 JSON 結構
       final Map<String, dynamic> newTouSettingsJson = {
         'isSeasonModeEnabled': _isSeasonModeEnabled,
         'summerStartMonth': _summerStartMonth,
@@ -194,7 +212,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         'winterSlot1': _winterSlot1.toJson(),
       };
 
-      // 取得設備 SN 並同時更新雲端設定
       final data = await Supabase.instance.client
           .from('devices')
           .update({'tou_settings': newTouSettingsJson}) 
@@ -204,7 +221,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
 
       final String sn = data['sn'];
 
-      // 呼叫 Edge Function 發送實體指令
       final response = await Supabase.instance.client.functions.invoke(
         'send-device-command',
         body: {
@@ -217,7 +233,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('共 ${commandsToDeploy.length} 條設定已成功同步至設備與雲端！'),
+              content: Text('已成功設定時間電價排程(共 ${commandsToDeploy.length} 組設定)'),
               backgroundColor: Colors.teal,
               behavior: SnackBarBehavior.floating,
             ),
@@ -245,9 +261,9 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('時間電價(TOU)排程設定', style: TextStyle(color: Colors.black87, fontSize: 17, fontWeight: FontWeight.bold)),
+        title: const Text('時間電價(TOU)排程', style: TextStyle(color: Colors.black87, fontSize: 17, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black87),
@@ -261,8 +277,15 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
                 padding: EdgeInsets.only(left: 8, bottom: 8),
                 child: Text('季節模式', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
               ),
-              Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              // 🎯 替換：移除邊線改為柔和陰影
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))
+                  ]
+                ),
                 child: Column(
                   children: [
                     SwitchListTile(
@@ -274,7 +297,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
                       onChanged: (bool value) => setState(() => _isSeasonModeEnabled = value),
                     ),
                     if (_isSeasonModeEnabled) ...[
-                      const Divider(height: 1),
+                      const Divider(height: 1, color: Color(0xFFF1F5F9)),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: Row(
@@ -317,16 +340,15 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
                 _buildSlotCard('全年 (時段 2)', _winterSlot1),
               ],
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
               ElevatedButton(
-                // 🎯 核心攔截：統一警告提示風格
                 onPressed: _isSending 
                     ? null 
                     : (widget.isRootOrOwner 
                         ? _sendBatchCommands 
                         : () {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                              content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
+                              content: Text('權限不足，無法執行此功能'),
                               backgroundColor: Colors.orange
                             ));
                           }),
@@ -346,7 +368,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     );
   }
 
-  // 輔助 UI 元件：月份選擇器
   Widget _buildMonthDropdown(int currentValue, Function(int?) onChanged) {
     return DropdownButton<int>(
       value: currentValue,
@@ -359,94 +380,103 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     );
   }
 
-  // 輔助 UI 元件：時段設定卡片
+  // 🎯 替換：改為立體無框卡片設計
   Widget _buildSlotCard(String title, TouPeriod period) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ExpansionTile(
-        title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          '狀態: ${period.state == 0 ? '關閉' : period.state == 1 ? '充電' : '放電'} | ${period.startTime.format(context)} - ${period.endTime.format(context)}',
-          style: TextStyle(fontSize: 12, color: period.state == 0 ? Colors.black38 : Colors.teal),
-        ),
-        children: [
-          const Divider(height: 1),
-          ListTile(
-            title: const Text('運行狀態(State)', style: TextStyle(fontSize: 14)),
-            trailing: DropdownButton<int>(
-              value: period.state,
-              underline: const SizedBox(),
-              items: const [
-                DropdownMenuItem(value: 0, child: Text('0: 關閉 (Disable)')),
-                DropdownMenuItem(value: 1, child: Text('1: 充電 (Charge)')),
-                DropdownMenuItem(value: 2, child: Text('2: 放電 (Discharge)')),
-              ],
-              onChanged: (int? value) {
-                if (value != null) setState(() => period.state = value);
-              },
-            ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))
+        ]
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          subtitle: Text(
+            '狀態: ${period.state == 0 ? '關閉' : period.state == 1 ? '充電' : '放電'} | ${period.startTime.format(context)} - ${period.endTime.format(context)}',
+            style: TextStyle(fontSize: 12, color: period.state == 0 ? Colors.black38 : Colors.teal),
           ),
-          
-          Padding(
-            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: period.state == 0 ? Colors.grey.withValues(alpha: 0.1) : Colors.teal.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
+          children: [
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            ListTile(
+              title: const Text('運行狀態(State)', style: TextStyle(fontSize: 14)),
+              trailing: DropdownButton<int>(
+                value: period.state,
+                underline: const SizedBox(),
+                items: const [
+                  DropdownMenuItem(value: 0, child: Text('0: 關閉 (Disable)')),
+                  DropdownMenuItem(value: 1, child: Text('1: 充電 (Charge)')),
+                  DropdownMenuItem(value: 2, child: Text('2: 放電 (Discharge)')),
+                ],
+                onChanged: (int? value) {
+                  if (value != null) setState(() => period.state = value);
+                },
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline, 
-                    size: 18, 
-                    color: period.state == 0 ? Colors.black45 : Colors.teal
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _getStateDescription(period.state),
-                      style: TextStyle(
-                        fontSize: 12, 
-                        color: period.state == 0 ? Colors.black54 : Colors.teal.shade800, 
-                        height: 1.4
+            ),
+            
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: period.state == 0 ? Colors.grey.shade50 : Colors.teal.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline, 
+                      size: 18, 
+                      color: period.state == 0 ? Colors.black45 : Colors.teal
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _getStateDescription(period.state),
+                        style: TextStyle(
+                          fontSize: 12, 
+                          color: period.state == 0 ? Colors.black54 : Colors.teal.shade800, 
+                          height: 1.4
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.play_circle_outline, color: Colors.teal),
-            title: const Text('開始時間', style: TextStyle(fontSize: 14)),
-            subtitle: const Text('輸入時間範圍為：00:00~23:59', style: TextStyle(fontSize: 11, color: Colors.black45)),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
-              child: Text(period.startTime.format(context), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            ListTile(
+              leading: const Icon(Icons.play_circle_outline, color: Colors.teal),
+              title: const Text('開始時間', style: TextStyle(fontSize: 14)),
+              subtitle: const Text('點擊右側時間來進行設定', style: TextStyle(fontSize: 11, color: Colors.black45)),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
+                child: Text(period.startTime.format(context), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              onTap: () => _selectTime(context, period, true),
             ),
-            onTap: () => _selectTime(context, period, true),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.stop_circle_outlined, color: Colors.orange),
-            title: const Text('結束時間', style: TextStyle(fontSize: 14)),
-            subtitle: const Text('輸入時間範圍為：00:00~23:59', style: TextStyle(fontSize: 11, color: Colors.black45)),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
-              child: Text(period.endTime.format(context), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            ListTile(
+              leading: const Icon(Icons.stop_circle_outlined, color: Colors.orange),
+              title: const Text('結束時間', style: TextStyle(fontSize: 14)),
+              subtitle: const Text('點擊右側時間來進行設定', style: TextStyle(fontSize: 11, color: Colors.black45)),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
+                child: Text(period.endTime.format(context), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              onTap: () => _selectTime(context, period, false),
             ),
-            onTap: () => _selectTime(context, period, false),
-          ),
-          const SizedBox(height: 8),
-        ],
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

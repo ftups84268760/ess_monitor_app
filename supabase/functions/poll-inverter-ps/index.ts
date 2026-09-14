@@ -41,6 +41,36 @@ const ALARM_DICTIONARY: Record<string, string> = {
   'Z': 'FAN Lock Warning (風扇堵轉警告)'
 };
 
+// 💥 系統錯誤大腦：01-80 字典對照表 (依據 ^P004CFS 協議)
+const FAULT_DICTIONARY: Record<string, string> = {
+  '01': 'BUS exceed the upper limit (BUS電壓過高)',
+  '02': 'BUS drop to the lower limit (BUS電壓過低)',
+  '03': 'BUS soft start time out (BUS軟啟動超時)',
+  '04': 'Inverter voltage soft start time out (逆變器軟啟動超時)',
+  '05': 'Inverter current exceed the upper limit (逆變器電流過載)',
+  '06': 'Temperature over (溫度過高)',
+  '07': 'Inverter relay work abnormal (逆變器繼電器異常)',
+  '08': 'Current sample abnormal when inverter doesn\'t work (非工作時電流採樣異常)',
+  '09': 'Solar input voltage exceed upper limit (太陽能輸入電壓過高)',
+  '10': 'Solar power voltage abnormal (太陽能電壓異常)',
+  '19': 'Main Board CT Fault (主機板CT故障)',
+  '21': 'Grid Board CT Fault (電網板CT故障)',
+  '22': 'Battery voltage upper limit (電池電壓過高)',
+  '23': 'Over load (負載過載)',
+  '27': 'Fan lock (風扇堵轉)',
+  '32': 'Battery DC-DC over current (電池DC-DC過電流)',
+  '33': 'AC output voltage too low (AC輸出電壓過低)',
+  '34': 'AC output voltage too high (AC輸出電壓過高)',
+  '50': 'Negative power detected (偵測到逆向功率)',
+  '62': 'Communication lost between main-board and relay-board (主機與繼電器板通訊遺失)',
+  '71': 'Parallel version is incompatible (並聯版本不相容)',
+  '73': 'CAN fault (CAN通訊錯誤)',
+  '74': 'HOST lost (主機通訊遺失)',
+  '75': 'SYN lost (同步失敗)',
+  '79': 'BUS Unbalanced (BUS電壓不平衡)',
+  '80': 'BUS Balances circuit hardware is faulty (BUS平衡電路硬體故障)'
+};
+
 Deno.serve(async (req: Request) => {
   try {
     const rawBodyText = await req.text()
@@ -76,7 +106,7 @@ Deno.serve(async (req: Request) => {
 
       if (error) throw error
 
-      // 💓 新增：寫入成功後，更新看門狗心跳與上線狀態
+      // 💓 寫入成功後，更新看門狗心跳與上線狀態
       await supabase.from('devices').update({
         last_active_at: new Date().toISOString(),
         is_online: true
@@ -104,7 +134,7 @@ Deno.serve(async (req: Request) => {
 
       if (error) throw error
 
-      // 💓 新增：寫入成功後，更新看門狗心跳與上線狀態
+      // 💓 寫入成功後，更新看門狗心跳與上線狀態
       await supabase.from('devices').update({
         last_active_at: new Date().toISOString(),
         is_online: true
@@ -154,7 +184,7 @@ Deno.serve(async (req: Request) => {
             console.log(`[新增告警] 設備 ${deviceId}: ${ALARM_DICTIONARY[code]}`);
           } 
           else if (!isTriggered && isCurrentlyActive) {
-            // [解除]：更新為已解除，寫入解除時間 (維持 UTC，由前端或 SQL 轉換本地時間)
+            // [解除]：更新為已解除，寫入解除時間
             await supabase.from('device_alarms')
               .update({ is_active: false, resolved_at: new Date().toISOString() })
               .eq('device_id', deviceId)
@@ -169,25 +199,96 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================================
+    // 情境 A4：收到系統錯誤狀態 (^D008) ➔ 寫入 device_alarms
+    // ========================================================================
+    if (rawResponse.includes('^D008')) {
+      console.log(`[Webhook Recv] 💥 收到系統錯誤狀態: ${rawResponse.trim()}`)
+      
+      // 清洗字串：只保留 ^D008 之後的有效字元
+      const cleanStr = rawResponse.substring(rawResponse.indexOf('^D008') + 5).replace(/[^A-Za-z0-9,\^]/g, '');
+      const parts = cleanStr.split(',');
+
+      // 陣列結構解析 (^D008AA,BB)：
+      // parts[0] = AA (最新故障代碼)
+      // parts[1] = BB (Flash中儲存的ID)
+      if (parts.length >= 2) { 
+        // 取得 AA 並補齊兩位數 (例如 '1' -> '01')
+        const latestFaultCode = parts[0].padStart(2, '0'); 
+        
+        // 撈取資料庫中該設備「正在觸發中」的錯誤紀錄
+        const { data: activeFaults, error: fetchError } = await supabase
+          .from('device_alarms')
+          .select('id, alarm_code')
+          .eq('device_id', deviceId)
+          .eq('is_active', true);
+
+        if (fetchError) throw fetchError;
+        const activeFaultCodes = (activeFaults || []).map(a => a.alarm_code);
+
+        if (latestFaultCode === '00' || latestFaultCode === '0') {
+          // [全部解除]：回傳 00 代表目前沒有系統錯誤，把所有數字錯誤碼標記為已解決
+          for (const code of activeFaultCodes) {
+            // 只解除數字碼 (保留 A-Z 告警)
+            if (code.match(/^[0-9]+$/)) {
+              await supabase.from('device_alarms')
+                .update({ is_active: false, resolved_at: new Date().toISOString() })
+                .eq('device_id', deviceId)
+                .eq('alarm_code', code)
+                .eq('is_active', true);
+              console.log(`[解除錯誤] 設備 ${deviceId}: Code ${code}`);
+            }
+          }
+        } else {
+          // [觸發]：有收到具體的錯誤碼
+          if (!activeFaultCodes.includes(latestFaultCode)) {
+            const errorMsg = FAULT_DICTIONARY[latestFaultCode] || `System Fault ${latestFaultCode} (未定義錯誤)`;
+            await supabase.from('device_alarms').insert({
+              device_id: deviceId,
+              alarm_code: latestFaultCode,
+              alarm_message: errorMsg,
+              is_active: true
+            });
+            console.log(`[新增錯誤] 設備 ${deviceId}: ${errorMsg}`);
+          } 
+          
+          // [自動解除舊錯誤]：因為協議只給「最新」的一個錯誤，所以我們可以把其他的數字錯誤標記為解除
+          for (const code of activeFaultCodes) {
+            if (code.match(/^[0-9]+$/) && code !== latestFaultCode) {
+              await supabase.from('device_alarms')
+                .update({ is_active: false, resolved_at: new Date().toISOString() })
+                .eq('device_id', deviceId)
+                .eq('alarm_code', code)
+                .eq('is_active', true);
+              console.log(`[解除舊錯誤] 設備 ${deviceId}: Code ${code}`);
+            }
+          }
+        }
+      }
+
+      return new Response(JSON.stringify({ success: true, message: 'Faults processed' }), { headers: { "Content-Type": "application/json" } })
+    }
+
+    // ========================================================================
     // 防護機制：非預期請求直接無視 (防迴圈)
     // ========================================================================
-    if (rawResponse.includes('^P003') || (triggerSource !== 'cron' && !body.trigger)) {
+    if (rawResponse.includes('^P003') || rawResponse.includes('^P004') || (triggerSource !== 'cron' && !body.trigger)) {
       return new Response(JSON.stringify({ success: true, message: 'Ignored non-cron request' }), { headers: { "Content-Type": "application/json" } })
     }
 
     // ========================================================================
     // 情境 B：Cron 排程 ➔ 動態發送多道輪詢指令至所有設備
     // ========================================================================
-    const cmdsToPublish = ['^P003PS\r', '^P003WS\r', '^P003GS\r']
+    // 🎯 新增了 ^P004CFS\r 查詢系統錯誤狀態
+    const cmdsToPublish = ['^P003PS\r', '^P003WS\r', '^P003GS\r', '^P004CFS\r']
     const emqxApiUrl = `https://${emqxHost}/api/v5/publish`
     const authHeader = 'Basic ' + btoa(`${appId}:${appSecret}`)
 
     console.log(`[Cron Triggered] ⏰ pg_cron 定時觸發：準備向所有上線設備下發輪詢指令群`)
 
-    // 1. 查詢資料庫：找出所有已註冊且目前標記為上線的設備
+    // 1. 查詢資料庫：找出所有已註冊的設備
     const { data: devices, error: dbError } = await supabase
       .from('devices')
-      .select('sn') // 🎯 修正：從 dtu_sn 嚴格改回逆變器的 sn
+      .select('sn') 
 
     if (dbError) {
       console.error('❌ 查詢設備清單失敗:', dbError)
@@ -195,17 +296,15 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!devices || devices.length === 0) {
-      console.log('⚠️ 目前沒有上線的設備需要輪詢')
+      console.log('⚠️ 目前沒有註冊的設備需要輪詢')
       return new Response(JSON.stringify({ success: true, message: 'No online devices to poll' }), {
         headers: { "Content-Type": "application/json" }
       })
     }
 
     const publishPromises = devices.map(async (device) => {
-      // 🎯 修正：防呆檢查改為 device.sn
       if (!device.sn) return { success: false, sn: 'unknown', reason: 'Missing sn' }
       
-      // 🎯 修正：確保 Topic 綁定的是逆變器本體的序號
       const cmdTopic = `inverter/command/${device.sn}`
       let successCount = 0;
       let lastStatus = 200;
@@ -229,15 +328,15 @@ Deno.serve(async (req: Request) => {
         }
 
         if (successCount === cmdsToPublish.length) {
-          console.log(`🎉 [輪詢成功] 已下發 PS, WS, GS 至 ${cmdTopic}`)
-          return { success: true, sn: device.sn } // 🎯 修正回傳變數
+          console.log(`🎉 [輪詢成功] 已下發 PS, WS, GS, CFS 至 ${cmdTopic}`)
+          return { success: true, sn: device.sn } 
         } else {
-          return { success: false, sn: device.sn, status: lastStatus } // 🎯 修正回傳變數
+          return { success: false, sn: device.sn, status: lastStatus } 
         }
         
       } catch (err) {
         console.error(`❌ fetch EMQX API 失敗 (${cmdTopic}):`, err)
-        return { success: false, sn: device.sn, error: String(err) } // 🎯 修正回傳變數
+        return { success: false, sn: device.sn, error: String(err) } 
       }
     })
 
@@ -275,13 +374,12 @@ function parseInverterPsResponse(resp: string) {
   const firstPart = parts[0].replace('^D107', '');
 
   return {
-    solar1_input_power: parseFloat(firstPart) || 0,        // parts[0]
-    solar2_input_power: parseFloat(parts[1]) || 0,         // parts[1]
+    solar1_input_power: parseFloat(firstPart) || 0,
+    solar2_input_power: parseFloat(parts[1]) || 0,
     
-    // ⚠️ 避開協議保留的連續空欄位陷阱 (,,)
     // 跳過 parts[2]
 
-    ac_in_active_power_r: parseFloat(parts[3]) || 0,       // parts[3]
+    ac_in_active_power_r: parseFloat(parts[3]) || 0,
     ac_in_active_power_s: parseFloat(parts[4]) || 0,
     ac_in_active_power_t: parseFloat(parts[5]) || 0,
     ac_in_total_active_power: parseFloat(parts[6]) || 0,
@@ -324,31 +422,31 @@ function parseInverterGsResponse(resp: string) {
   const firstPart = parts[0].replace('^D119', '');
 
   return {
-    pv1_voltage: (parseFloat(firstPart) || 0) / 10.0,            // parts[0]
-    pv2_voltage: (parseFloat(parts[1]) || 0) / 10.0,             // parts[1]
-    pv1_current: (parseFloat(parts[2]) || 0) / 100.0,            // parts[2]
-    pv2_current: (parseFloat(parts[3]) || 0) / 100.0,            // parts[3]
+    pv1_voltage: (parseFloat(firstPart) || 0) / 10.0,
+    pv2_voltage: (parseFloat(parts[1]) || 0) / 10.0,
+    pv1_current: (parseFloat(parts[2]) || 0) / 100.0,
+    pv2_current: (parseFloat(parts[3]) || 0) / 100.0,
     
-    battery_voltage: (parseFloat(parts[4]) || 0) / 10.0,         // parts[4]
-    battery_capacity: parseInt(parts[5]) || 0,                   // parts[5]
-    battery_current: (parseFloat(parts[6]) || 0) / 10.0,         // parts[6]
+    battery_voltage: (parseFloat(parts[4]) || 0) / 10.0,
+    battery_capacity: parseInt(parts[5]) || 0,
+    battery_current: (parseFloat(parts[6]) || 0) / 10.0,
     
-    ac_in_v_r: (parseFloat(parts[7]) || 0) / 10.0,               // parts[7]
-    ac_in_v_s: (parseFloat(parts[8]) || 0) / 10.0,               // parts[8]
-    ac_in_v_t: (parseFloat(parts[9]) || 0) / 10.0,               // parts[9]
-    ac_in_freq: (parseFloat(parts[10]) || 0) / 100.0,            // parts[10]
+    ac_in_v_r: (parseFloat(parts[7]) || 0) / 10.0,
+    ac_in_v_s: (parseFloat(parts[8]) || 0) / 10.0,
+    ac_in_v_t: (parseFloat(parts[9]) || 0) / 10.0,
+    ac_in_freq: (parseFloat(parts[10]) || 0) / 100.0,
     
-    // 💡 協議在這裡保留了 parts[11], parts[12], parts[13] 作為空欄位
+    // parts[11], parts[12], parts[13] 保留空欄位
     
-    ac_out_v_r: (parseFloat(parts[14]) || 0) / 10.0,             // parts[14]
-    ac_out_v_s: (parseFloat(parts[15]) || 0) / 10.0,             // parts[15]
-    ac_out_v_t: (parseFloat(parts[16]) || 0) / 10.0,             // parts[16]
-    ac_out_freq: (parseFloat(parts[17]) || 0) / 100.0,           // parts[17]
+    ac_out_v_r: (parseFloat(parts[14]) || 0) / 10.0,
+    ac_out_v_s: (parseFloat(parts[15]) || 0) / 10.0,
+    ac_out_v_t: (parseFloat(parts[16]) || 0) / 10.0,
+    ac_out_freq: (parseFloat(parts[17]) || 0) / 100.0,
     
-    // ⚠️ 連續逗號陷阱區：parts[18], parts[19], parts[20] 是連續的逗號空欄位
+    // parts[18], parts[19], parts[20] 連續空欄位
     
-    inner_temp: parseInt(parts[21]) || 0,                        // parts[21]
-    comp_max_temp: parseInt(parts[22]) || 0,                     // parts[22]
-    battery_temp: parseInt(parts[23]) || 0,                      // parts[23]
+    inner_temp: parseInt(parts[21]) || 0,
+    comp_max_temp: parseInt(parts[22]) || 0,
+    battery_temp: parseInt(parts[23]) || 0,
   }
 }

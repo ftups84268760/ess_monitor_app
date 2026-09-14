@@ -20,8 +20,9 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
 
   double _provisioningProgress = 0.0;
   String _provisioningStatusText = '等待開始...';
+  bool _isPinging = false; // 🎯 新增：紀錄是否正在測試連線中
 
-/// 🎯 新增：檢查逆變器 SN 是否已經存在於資料庫
+  /// 🎯 新增：檢查逆變器 SN 是否已經存在於資料庫
   Future<bool> _checkIfDeviceExists(String inverterSn) async {
     try {
       final data = await Supabase.instance.client
@@ -60,7 +61,6 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
     );
   }
 
-
   /// 雲端註冊：將逆變器與 DTU 的對應關係寫入 Supabase
   Future<bool> _registerDeviceToCloud(String inverterSn, String dtuSn) async {
     try {
@@ -79,6 +79,15 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
         'address': '尚未設定',
         'electricity_tariff': '一般累進表燈(住商)',
         'is_online': true,
+        'tou_settings': {
+          'isSeasonModeEnabled': false,
+          'summerStartMonth': 6,
+          'summerEndMonth': 9,
+          'winterSlot0': {'state': 1, 'start': '00:00', 'end': '00:00'},
+          'winterSlot1': {'state': 1, 'start': '00:00', 'end': '00:00'},
+          'summerSlot0': {'state': 1, 'start': '00:00', 'end': '00:00'},
+          'summerSlot1': {'state': 1, 'start': '00:00', 'end': '00:00'}
+        },
         'notification_settings': {
           'grid_off': true,
           'battery_full': true,
@@ -210,7 +219,7 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
         }
       }
 
-// ---------------------------------------------------------
+      // ---------------------------------------------------------
       // Step 1: 喚醒設備 (🎯 加入防掉包的連環敲門機制)
       // ---------------------------------------------------------
       setState(() => _provisioningStatusText = '設定中...');
@@ -261,13 +270,52 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
     }
   }
   
+  // 🎯 新增：DTU 連線測試功能
+  Future<void> _testDtuConnection() async {
+    final ip = _dtuIpController.text.trim();
+    if (ip.isEmpty) {
+      _showSnackBar('請先輸入DTU的IP位址');
+      return;
+    }
+
+    setState(() { _isPinging = true; });
+
+    try {
+      bool isOnline = false;
+      
+      // 方法一：嘗試對 Port 80 建立 TCP 連線 (多數 DTU 有網頁後台)
+      // 這個方法在 iOS/Android 上最穩定，不易被系統防火牆擋下
+      try {
+        final socket = await Socket.connect(ip, 80, timeout: const Duration(seconds: 2));
+        isOnline = true;
+        socket.destroy();
+      } catch (_) {
+        // 方法二：如果 Port 80 不通，則退回使用系統內建的 ICMP Ping 指令
+        try {
+          final result = await Process.run('ping', ['-c', '1', '-W', '2', ip]);
+          if (result.exitCode == 0) isOnline = true;
+        } catch (_) {}
+      }
+
+      if (mounted) {
+        if (isOnline) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ DTU連線測試成功', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)), backgroundColor: Colors.orangeAccent));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ DTU連線測試失敗，請確認手機與DTU是否在相同網路區段'), backgroundColor: Colors.redAccent));
+        }
+      }
+    } finally {
+      if (mounted) setState(() { _isPinging = false; });
+    }
+  }
+
   Future<void> _startProvisioningFlow() async {
     final ip = _dtuIpController.text.trim();
     final inverterSn = _inverterSnController.text.trim();
     final dtuSn = _dtuSnController.text.trim();
 
     if (ip.isEmpty || inverterSn.isEmpty || dtuSn.isEmpty) {
-      _showSnackBar('請確認 IP 與兩組設備序號皆已填寫');
+      _showSnackBar('請確認DTU的IP位址與兩組設備序號皆已填寫');
       return;
     }
 
@@ -493,19 +541,37 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
         TextField(
           controller: _dtuIpController,
           style: const TextStyle(color: Colors.white, fontSize: 14),
-          // 限制只能輸入數字與小數點 (可選，能提升輸入體驗)
           keyboardType: const TextInputType.numberWithOptions(decimal: true), 
           decoration: const InputDecoration(
             contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 12),
             border: OutlineInputBorder(),
             labelText: 'DTU IP(請先將手機與DTU在同一網路區段)',
-            // 🎯 新增提示詞與提示詞顏色
             hintText: '請輸入配置的IP位址',
             hintStyle: TextStyle(color: Colors.white30, fontSize: 13), 
             labelStyle: TextStyle(color: Colors.white54),
             prefixIcon: Icon(Icons.router, color: Colors.orangeAccent, size: 20),
           ),
         ),
+        
+        // 🎯 新增這段：右下角的 DTU 連線測試按鈕
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.orangeAccent,
+              side: const BorderSide(color: Colors.orangeAccent),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            onPressed: _isPinging ? null : _testDtuConnection,
+            icon: _isPinging 
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.orangeAccent, strokeWidth: 2))
+                : const Icon(Icons.wifi_find_rounded, size: 18),
+            label: Text(_isPinging ? '測試中...' : 'DTU連線測試', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+        ),
+        
         const Spacer(),
         
         ElevatedButton(

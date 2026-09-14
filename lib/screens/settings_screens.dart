@@ -3,13 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'dart:async';
 import '../core/constants.dart';
 import 'tou_settings_screen.dart';
 import 'dashboard/dtu_replacement_screen.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'dart:ui';
 
-// 🎯 更新為 StatefulWidget 進行權限管理
+// ==========================================
+// 1. 設定主選單
+// ==========================================
 class SettingsSubMenuScreen extends StatefulWidget {
   final String deviceDbId;
   final String? accountType;
@@ -63,68 +68,117 @@ class _SettingsSubMenuScreenState extends State<SettingsSubMenuScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isRoot = widget.accountType == '系統管理員(root)';
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      extendBodyBehindAppBar: true, 
+      extendBody: true, 
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('系統設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
       ),
-      body: _isLoading 
-          ? const Center(child: CircularProgressIndicator(color: Colors.teal))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildSubMenuTile(context, Icons.tsunami_outlined, '惡劣天氣預測', WeatherForecastScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
-                _buildSubMenuTile(context, Icons.schedule, '時間電價(TOU)排程', TouSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
-                _buildSubMenuTile(context, Icons.hourglass_bottom_rounded, '電價方案', ElectricityTariffScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
-                _buildSubMenuTile(context, Icons.developer_board, '設備資訊', DeviceInfoSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
-                
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Divider(color: Colors.black12, height: 1),
-                ),
-                _buildSubMenuTile(
-                  context, 
-                  Icons.tune_rounded, 
-                  '進階設定', 
-                  DeviceAdvancedSettingsScreen(deviceDbId: widget.deviceDbId, inverterSn: widget.inverterSn ?? '', isRootOrOwner: _isRootOrOwner)
-                ),
-              ],
+      body: SizedBox.expand(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Image.asset('assets/menu_full_bg.png', fit: BoxFit.cover),
             ),
+            SafeArea(
+              bottom: false,
+              child: _isLoading 
+                  ? const Center(child: CircularProgressIndicator(color: Colors.tealAccent))
+                  : ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                      children: [
+                        _buildSubMenuTile(context, Icons.tsunami_outlined, '惡劣天氣預測', WeatherForecastScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                        _buildSubMenuTile(context, Icons.schedule, '時間電價(TOU)排程', TouSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                        _buildSubMenuTile(context, Icons.hourglass_bottom_rounded, '電價方案', ElectricityTariffScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                        _buildSubMenuTile(context, Icons.developer_board, '設備資訊', DeviceInfoSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                        
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Divider(color: Colors.black12, height: 1),
+                        ),
+                        
+                        _buildSubMenuTile(
+                          context, 
+                          Icons.tune_rounded, 
+                          '進階設定', 
+                          DeviceAdvancedSettingsScreen(
+                            deviceDbId: widget.deviceDbId, 
+                            inverterSn: widget.inverterSn ?? '', 
+                            isRootOrOwner: _isRootOrOwner,
+                            isRoot: isRoot,
+                          )
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
+  // 🎯 替換：每個選項現在都是獨立的毛玻璃卡片，並加上立體陰影
   Widget _buildSubMenuTile(BuildContext context, IconData icon, String title, Widget? targetScreen) {
-    return Card(
-      elevation: 1,
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        leading: Icon(icon, color: Colors.teal),
-        title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
-        onTap: () {
-          if (!_hasPermission) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('無此修改權限，僅設備擁有者可進入設定。'),
-              backgroundColor: Colors.redAccent,
-              duration: Duration(seconds: 2),
-            ));
-            return;
-          }
-
-          if (targetScreen != null) {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => targetScreen));
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('「$title」功能模組已就緒，正等待通訊協議對齊。')));
-          }
-        },
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Container(
+        // 🎯 新增：外層加上與告警頁面一致的陰影參數
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+              ),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                leading: Icon(icon, color: Colors.teal),
+                title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
+                onTap: () {
+                  if (!_hasPermission) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('無此修改權限，僅設備擁有者可進入設定。'),
+                      backgroundColor: Colors.redAccent,
+                      duration: Duration(seconds: 2),
+                    ));
+                    return;
+                  }
+                  if (targetScreen != null) {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => targetScreen));
+                  }
+                },
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
+// ==========================================
+// 2. 系統推播通知設定
+// ==========================================
 class PushNotificationSettingsScreen extends StatefulWidget {
   final String deviceDbId;
   const PushNotificationSettingsScreen({super.key, required this.deviceDbId});
@@ -167,7 +221,7 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
             .eq('id', user.id);
       }
     } catch (e) {
-      debugPrint('全域推播狀態儲存失敗');
+      debugPrint('全域推播狀態儲存失敗: $e');
     }
   }
 
@@ -193,7 +247,7 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
         });
       }
     } catch (e) {
-      // 靜默處理預設值
+      debugPrint('讀取推播設定異常 (套用預設值): $e'); 
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -219,7 +273,7 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('推播通知條件已成功儲存！'),
+          content: Text('設定完成'),
           backgroundColor: Colors.teal,
         ));
         Navigator.pop(context);
@@ -240,7 +294,7 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
     final bool isMasterEnabled = GlobalState.isPushNotificationEnabled;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Colors.white, 
       appBar: AppBar(
         title: const Text('系統推播通知條件', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
         backgroundColor: Colors.white,
@@ -255,13 +309,17 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
           : ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
-                Card(
-                  elevation: 1,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
+                  ),
                   child: SwitchListTile(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     secondary: const Icon(Icons.notifications_active, color: Colors.teal),
                     title: const Text('允許所有系統推播通知', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    subtitle: const Text('關閉後將暫停接收所有來自 APP 的警告與提示', style: TextStyle(fontSize: 11, color: Colors.black45)),
+                    subtitle: const Text('關閉後將暫停接收所有警告與提示', style: TextStyle(fontSize: 11, color: Colors.black45)),
                     activeThumbColor: Colors.white,
                     activeTrackColor: Colors.teal,
                     value: isMasterEnabled,
@@ -269,37 +327,35 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
                   ),
                 ),
                 
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 
                 const Padding(
-                  padding: EdgeInsets.only(left: 4.0, bottom: 8.0),
-                  child: Text('細項條件設定 (需開啟總開關)：', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w500)),
+                  padding: EdgeInsets.only(left: 4.0, bottom: 12.0),
+                  child: Text('細項條件設定(需開啟「允許所有系統推播通知」)', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.bold)),
                 ),
 
                 Opacity(
                   opacity: isMasterEnabled ? 1.0 : 0.5,
                   child: IgnorePointer(
                     ignoring: !isMasterEnabled,
-                    child: Card(
-                      elevation: 1,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
+                      ),
                       child: Column(
                         children: [
                           _buildSwitchTile('⚡ 市電停電 / 復電', '當電網斷電或恢復供電時，發送即時狀態推播', gridOff, (v) => setState(() => gridOff = v)),
                           const Divider(height: 1, color: Color(0xFFF1F5F9)),
-
                           _buildSwitchTile('🔋 電池容量已滿 (100%)', '當儲能電池充飽電達 100% 時', batteryFull, (v) => setState(() => batteryFull = v)),
                           const Divider(height: 1, color: Color(0xFFF1F5F9)),
-
                           _buildSwitchTile('🪫 電池容量低電位 (>20%)', '當電池剩餘電量低於 20% 安全儲備時', batteryLow, (v) => setState(() => batteryLow = v)),
                           const Divider(height: 1, color: Color(0xFFF1F5F9)),
-
                           _buildSwitchTile('☀️ 無太陽能發電', '當太陽能發電功率降至 0 W 時', noPv, (v) => setState(() => noPv = v)),
                           const Divider(height: 1, color: Color(0xFFF1F5F9)),
-
                           _buildSwitchTile('🏠 負載滿載', '當負載接近逆變器額定功率時', loadFull, (v) => setState(() => loadFull = v)),
                           const Divider(height: 1, color: Color(0xFFF1F5F9)),
-
                           _buildSwitchTile('⚠️ 負載過載', '當負載超越逆變器最大容許功率時', loadOverload, (v) => setState(() => loadOverload = v)),
                         ],
                       ),
@@ -307,13 +363,13 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
 
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: isMasterEnabled ? Colors.teal : Colors.grey,
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: (_isSaving || !isMasterEnabled) ? null : _saveNotificationSettings,
                   child: Text(_isSaving ? '儲存中...' : '儲存設定', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -326,7 +382,8 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
   Widget _buildSwitchTile(String title, String subtitle, bool value, Function(bool) onChanged) {
     return SwitchListTile(
       dense: true,
-      activeThumbColor: Colors.teal,
+      activeThumbColor: Colors.white,
+      activeTrackColor: Colors.teal,
       title: Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
       subtitle: Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.black45)),
       value: value,
@@ -335,6 +392,9 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
   }
 }
 
+// ==========================================
+// 3. 電價方案設定
+// ==========================================
 class ElectricityTariffScreen extends StatefulWidget {
   final String deviceDbId;
   final bool isRootOrOwner; 
@@ -354,6 +414,9 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
   ];
 
   String _selectedTariff = '一般累進表燈(住商)';
+  double _customRate = 3.5;
+  final TextEditingController _rateController = TextEditingController();
+
   bool _isLoading = true;
   bool _isSaving = false;
 
@@ -369,13 +432,15 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
 
       final data = await Supabase.instance.client
           .from('devices')
-          .select('electricity_tariff')
+          .select('electricity_tariff, custom_tariff_rate')
           .eq('id', widget.deviceDbId)
           .single();
 
       if (mounted) {
         setState(() {
           _selectedTariff = data['electricity_tariff'] ?? '一般累進表燈(住商)';
+          _customRate = double.tryParse((data['custom_tariff_rate'] ?? 3.5).toString()) ?? 3.5;
+          _rateController.text = _customRate.toString();
           _isLoading = false;
         });
       }
@@ -389,22 +454,24 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
     setState(() => _isSaving = true);
 
     try {
-      await Supabase.instance.client.from('devices').update({
+      Map<String, dynamic> updateData = {
         'electricity_tariff': _selectedTariff,
-      }).eq('id', widget.deviceDbId);
+      };
+      
+      if (_selectedTariff == '一般累進表燈(住商)') {
+        double parsedRate = double.tryParse(_rateController.text) ?? 3.5;
+        updateData['custom_tariff_rate'] = parsedRate;
+      }
+
+      await Supabase.instance.client.from('devices').update(updateData).eq('id', widget.deviceDbId);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('電價方案設定成功！'),
-          backgroundColor: Colors.teal,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定完成'), backgroundColor: Colors.teal));
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('儲存失敗，請檢查網路連線。'),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('儲存失敗，請檢查網路連線。')));
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -412,110 +479,62 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
   }
 
   Widget _buildTariffDetailNotice(String option) {
-    if (option == '簡易型(二段式)') {
-      return _buildNoticeContainer(
-        title: '【簡易型(二段式)】時段電價說明：',
-        content:
-          '📅 夏月 (6/1 ~ 9/30)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~09:00 離峰時段：電價 2.06 元/kWh\n'
-          '   - 09:00~24:00 尖峰時段：電價 5.16 元/kWh\n'
-          '• 週六、週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 2.06 元/kWh\n\n'
-          '❄️ 非夏月 (夏月以外時間)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~06:00、11:00~14:00 離峰時段：電價 1.99 元/kWh\n'
-          '   - 06:00~11:00、14:00~24:00 尖峰時段：電價 4.93 元/kWh\n'
-          '• 週六、週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 1.99 元/kWh',
-      );
-    } else if (option == '簡易型(三段式)') {
-      return _buildNoticeContainer(
-        title: '【簡易型(三段式)】時段電價說明：',
-        content:
-          '📅 夏月 (6/1 ~ 9/30)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~09:00 離峰時段：電價 2.06 元/kWh\n'
-          '   - 09:00~16:00 半尖峰時段：電價 4.69 元/kWh\n'
-          '   - 16:00~24:00 尖峰時段：電價 7.13 元/kWh\n'
-          '• 週六、週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 2.06 元/kWh\n\n'
-          '❄️ 非夏月 (夏月以外時間)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~06:00、11:00~14:00 離峰時段：電價 1.99 元/kWh\n'
-          '   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 4.48 元/kWh\n'
-          '• 週六、週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 1.99 元/kWh',
-      );
-    } else if (option == '標準型(二段式)') {
-      return _buildNoticeContainer(
-        title: '【標準型(二段式)】時段電價說明：',
-        content:
-          '📅 夏月 (6/1 ~ 9/30)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~09:00 離峰時段：電價 2.27 元/kWh\n'
-          '   - 09:00~24:00 尖峰時段：電價 5.54 元/kWh\n'
-          '• 週六：\n'
-          '   - 00:00~09:00 離峰時段：電價 2.27 元/kWh\n'
-          '   - 09:00~24:00 半尖峰時段：電價 2.76 元/kWh\n'
-          '• 週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 2.27 元/kWh\n\n'
-          '❄️ 非夏月 (夏月以外時間)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.15 元/kWh\n'
-          '   - 06:00~11:00、14:00~24:00 尖峰時段：電價 5.39 元/kWh\n'
-          '• 週六：\n'
-          '   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.15 元/kWh\n'
-          '   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 2.65 元/kWh\n'
-          '• 週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 2.15 元/kWh',
-      );
-    } else if (option == '標準型(三段式)') {
-      return _buildNoticeContainer(
-        title: '【標準型(三段式)】時段電價說明：',
-        content:
-          '📅 夏月 (6/1 ~ 9/30)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~09:00 離峰時段：電價 2.23 元/kWh\n'
-          '   - 09:00~16:00 半尖峰時段：電價 5.02 元/kWh\n'
-          '   - 16:00~24:00 尖峰時段：電價 8.12 元/kWh\n'
-          '• 週六：\n'
-          '   - 00:00~09:00 離峰時段：電價 2.23 元/kWh\n'
-          '   - 09:00~24:00 半尖峰時段：電價 2.50 元/kWh\n'
-          '• 週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 2.23 元/kWh\n\n'
-          '❄️ 非夏月 (夏月以外時間)\n'
-          '• 週一～週五：\n'
-          '   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.12 元/kWh\n'
-          '   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 4.86 元/kWh\n'
-          '• 週六：\n'
-          '   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.12 元/kWh\n'
-          '   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 2.40 元/kWh\n'
-          '• 週日：\n'
-          '   - 00:00~24:00 離峰時段：電價 2.12 元/kWh',
-      );
-    } else {
-      return _buildNoticeContainer(
-        title: '【一般累進表燈(住商)】說明：',
-        content: '依台電非時間電價之非營業用/營業用累進段數計費，無固定尖離峰時段區分。',
-      );
-    }
-  }
+    String title = '';
+    String content = '';
 
-  Widget _buildNoticeContainer({required String title, required String content}) {
+    if (option == '簡易型(二段式)') {
+      title = '【簡易型(二段式)】時段電價說明：';
+      content = '📅 夏月 (6/1 ~ 9/30)\n'
+                '• 週一～週五：\n   - 00:00~09:00 離峰時段：電價 2.06 元/kWh\n   - 09:00~24:00 尖峰時段：電價 5.16 元/kWh\n'
+                '• 週六、週日：\n   - 00:00~24:00 離峰時段：電價 2.06 元/kWh\n\n'
+                '❄️ 非夏月 (夏月以外時間)\n'
+                '• 週一～週五：\n   - 00:00~06:00、11:00~14:00 離峰時段：電價 1.99 元/kWh\n   - 06:00~11:00、14:00~24:00 尖峰時段：電價 4.93 元/kWh\n'
+                '• 週六、週日：\n   - 00:00~24:00 離峰時段：電價 1.99 元/kWh';
+    } else if (option == '簡易型(三段式)') {
+      title = '【簡易型(三段式)】時段電價說明：';
+      content = '📅 夏月 (6/1 ~ 9/30)\n'
+                '• 週一～週五：\n   - 00:00~09:00 離峰時段：電價 2.06 元/kWh\n   - 09:00~16:00 半尖峰時段：電價 4.69 元/kWh\n   - 16:00~24:00 尖峰時段：電價 7.13 元/kWh\n'
+                '• 週六、週日：\n   - 00:00~24:00 離峰時段：電價 2.06 元/kWh\n\n'
+                '❄️ 非夏月 (夏月以外時間)\n'
+                '• 週一～週五：\n   - 00:00~06:00、11:00~14:00 離峰時段：電價 1.99 元/kWh\n   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 4.48 元/kWh\n'
+                '• 週六、週日：\n   - 00:00~24:00 離峰時段：電價 1.99 元/kWh';
+    } else if (option == '標準型(二段式)') {
+      title = '【標準型(二段式)】時段電價說明：';
+      content = '📅 夏月 (6/1 ~ 9/30)\n'
+                '• 週一～週五：\n   - 00:00~09:00 離峰時段：電價 2.27 元/kWh\n   - 09:00~24:00 尖峰時段：電價 5.54 元/kWh\n'
+                '• 週六：\n   - 00:00~09:00 離峰時段：電價 2.27 元/kWh\n   - 09:00~24:00 半尖峰時段：電價 2.76 元/kWh\n'
+                '• 週日：\n   - 00:00~24:00 離峰時段：電價 2.27 元/kWh\n\n'
+                '❄️ 非夏月 (夏月以外時間)\n'
+                '• 週一～週五：\n   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.15 元/kWh\n   - 06:00~11:00、14:00~24:00 尖峰時段：電價 5.39 元/kWh\n'
+                '• 週六：\n   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.15 元/kWh\n   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 2.65 元/kWh\n'
+                '• 週日：\n   - 00:00~24:00 離峰時段：電價 2.15 元/kWh';
+    } else if (option == '標準型(三段式)') {
+      title = '【標準型(三段式)】時段電價說明：';
+      content = '📅 夏月 (6/1 ~ 9/30)\n'
+                '• 週一～週五：\n   - 00:00~09:00 離峰時段：電價 2.23 元/kWh\n   - 09:00~16:00 半尖峰時段：電價 5.02 元/kWh\n   - 16:00~24:00 尖峰時段：電價 8.12 元/kWh\n'
+                '• 週六：\n   - 00:00~09:00 離峰時段：電價 2.23 元/kWh\n   - 09:00~24:00 半尖峰時段：電價 2.50 元/kWh\n'
+                '• 週日：\n   - 00:00~24:00 離峰時段：電價 2.23 元/kWh\n\n'
+                '❄️ 非夏月 (夏月以外時間)\n'
+                '• 週一～週五：\n   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.12 元/kWh\n   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 4.86 元/kWh\n'
+                '• 週六：\n   - 00:00~06:00、11:00~14:00 離峰時段：電價 2.12 元/kWh\n   - 06:00~11:00、14:00~24:00 半尖峰時段：電價 2.40 元/kWh\n'
+                '• 週日：\n   - 00:00~24:00 離峰時段：電價 2.12 元/kWh';
+    } else {
+      title = '【一般累進表燈(住商)】說明：';
+      content = '依台電非時間電價之非營業用/營業用累進段數計費，無固定尖離峰時段區分。';
+    }
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.teal.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+        color: Colors.teal.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(content, style: const TextStyle(fontSize: 12, color: Colors.black87, height: 1.5)),
         ],
       ),
@@ -525,70 +544,81 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.white, 
       appBar: AppBar(
-        title: const Text('電價方案設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        title: const Text('電價方案', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal)))
-          : Padding(
-              padding: const EdgeInsets.all(20.0),
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('請選擇您的台電電價計費模式：', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedTariff,
-                    decoration: InputDecoration(
-                      labelText: '選擇電價方案',
-                      labelStyle: const TextStyle(color: Colors.teal),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8), 
-                        borderSide: const BorderSide(color: Colors.teal, width: 2)
-                      ),
-                      filled: true,
-                      fillColor: Colors.white,
-                      prefixIcon: const Icon(Icons.price_change_outlined, color: Colors.teal),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
                     ),
-                    items: _tariffOptions.map((option) {
-                      return DropdownMenuItem<String>(
-                        value: option,
-                        child: Text(option, style: const TextStyle(fontSize: 14)),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          _selectedTariff = val;
-                        });
-                      }
-                    },
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('請選擇您的台電電價方案：', style: TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 16),
+
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedTariff,
+                          decoration: InputDecoration(
+                            labelText: '電價方案',
+                            labelStyle: const TextStyle(color: Colors.teal),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                            filled: true,
+                            fillColor: const Color(0xFFF5F5F5),
+                            prefixIcon: const Icon(Icons.price_change_outlined, color: Colors.teal),
+                          ),
+                          items: _tariffOptions.map((option) => DropdownMenuItem<String>(value: option, child: Text(option, style: const TextStyle(fontSize: 14)))).toList(),
+                          onChanged: (val) {
+                            if (val != null) setState(() => _selectedTariff = val);
+                          },
+                        ),
+
+                        if (_selectedTariff == '一般累進表燈(住商)') ...[
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _rateController,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: InputDecoration(
+                              labelText: '當期每度平均單價 (元/度)',
+                              hintText: '請輸入電費單的「當期每度平均單價」',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                              filled: true,
+                              fillColor: const Color(0xFFF5F5F5),
+                              prefixIcon: const Icon(Icons.attach_money, color: Colors.teal),
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.only(top: 12.0),
+                            child: Text('※ 備註：可依據您近期電費單上的「當期每度平均單價」填寫，以利系統為您估算發電效益，預設值為3.5元/度。', style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4)),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
 
-                  const SizedBox(height: 16),
-
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: _buildTariffDetailNotice(_selectedTariff),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
+                  _buildTariffDetailNotice(_selectedTariff),
+                  const SizedBox(height: 32),
 
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.teal,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: _isSaving 
                         ? null 
@@ -596,11 +626,11 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
                             ? _saveTariffToSupabase 
                             : () {
                                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                  content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
+                                  content: Text('權限不足，無法執行此功能'),
                                   backgroundColor: Colors.orange
                                 ));
                               }),
-                    child: Text(_isSaving ? '儲存中...' : '儲存設定', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    child: Text(_isSaving ? '儲存中...' : '儲存設定', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                   ),
                 ],
               ),
@@ -609,6 +639,9 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
   }
 }
 
+// ==========================================
+// 4. 惡劣天氣預測設定
+// ==========================================
 class WeatherForecastScreen extends StatefulWidget {
   final String deviceDbId;
   final bool isRootOrOwner; 
@@ -647,7 +680,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
             .eq('id', user.id);
       }
     } catch (e) {
-      // 靜默處理
+      debugPrint('更新備援開關狀態失敗: $e'); 
     }
   }
 
@@ -692,7 +725,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('已成功向設備發送滿充備援指令！'),
+            content: Text('已開啟「惡劣天氣備援模式」'),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -701,7 +734,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('啟動備援失敗，請檢查網路連線。'),
+            content: Text('啟動失敗，請檢查網路連線。'),
           ),
         );
       }
@@ -730,9 +763,9 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
       
       _isStormBackupMode = data['is_storm_backup_mode'] ?? false;
 
-      if (rawAddr.isEmpty || rawAddr == '尚未設定' || rawAddr == '未設定安裝地址') {
+      if (rawAddr.isEmpty || rawAddr == '尚未設定' || rawAddr == '未設定安裝區域') {
         setState(() {
-          _currentAddress = '尚未設定安裝地址';
+          _currentAddress = '尚未設定安裝區域';
           _isLoadingWeather = false;
         });
         return;
@@ -796,10 +829,8 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
               }
             }
 
-            String dateSuffix = targetTime.day != now.day ? ' (明日)' : '';
-
             tempList.add({
-              'time': '$hourLabel$dateSuffix',
+              'time': hourLabel,
               'wx': wx,
               'pop': '$pop%',
               'temp': '$minT~$maxT°C',
@@ -838,122 +869,188 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      extendBodyBehindAppBar: true, 
+      extendBody: true, 
+      backgroundColor: Colors.transparent, 
       appBar: AppBar(
-        title: const Text('惡劣天氣預測', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent, 
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.white), onPressed: () => Navigator.pop(context)),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: SizedBox.expand(
+        child: Stack(
           children: [
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: SwitchListTile(
-                title: const Text('惡劣天氣預測提醒', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                subtitle: Text(GlobalState.isBackupProtectionEnabled ? '已開啟' : '已關閉'),
-                activeThumbColor: Colors.teal,
-                value: GlobalState.isBackupProtectionEnabled,
-                onChanged: (bool val) => _updateBackupProtectionToggle(val),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.gpp_good_rounded, color: Colors.orange, size: 20),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '開啟惡劣天氣預測，當偵測到未來 3~6 小時內可能出現惡劣天氣時將發送推播。',
-                      style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.5, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
+            Positioned.fill(
+              child: Image.asset(
+                'assets/weather_full_bg.png', 
+                fit: BoxFit.cover,
               ),
             ),
             
-            const SizedBox(height: 16),
+            SafeArea(
+              bottom: false, 
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 160),
 
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _isStormBackupMode ? Colors.grey : Colors.red.shade600,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  elevation: _isStormBackupMode ? 0 : 2,
-                ),
-                onPressed: _isStormBackupMode 
-                    ? null 
-                    : (widget.isRootOrOwner 
-                        ? _enableStormBackupMode 
-                        : () {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                              content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
-                              backgroundColor: Colors.orange
-                            ));
-                          }),
-                child: Text(
-                  _isStormBackupMode ? '「惡劣天氣備援模式」執行中' : '立即啟用「惡劣天氣備援模式」', 
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.65), 
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                dense: true,
+                                title: const Text('惡劣天氣預測提醒', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal)),
+                                subtitle: Text(GlobalState.isBackupProtectionEnabled ? '已開啟' : '已關閉', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                                activeThumbColor: Colors.white,
+                                activeTrackColor: Colors.teal,
+                                value: GlobalState.isBackupProtectionEnabled,
+                                onChanged: (bool val) => _updateBackupProtectionToggle(val),
+                              ),
+                              
+                              const SizedBox(height: 4), 
+                              
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
+                                child: const Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(Icons.gpp_good_rounded, color: Colors.orange, size: 18),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '當您啟用「惡劣天氣備援模式」，系統將暫停您的時間電價(TOU)排程，並盡可能將電池維持在高儲備量狀態',
+                                        style: TextStyle(fontSize: 11, color: Colors.black87, height: 1.4, fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 16),
+                              
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isStormBackupMode ? Colors.grey : Colors.red.shade600,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    elevation: _isStormBackupMode ? 0 : 2,
+                                  ),
+                                  onPressed: _isStormBackupMode 
+                                      ? null 
+                                      : (widget.isRootOrOwner 
+                                          ? _enableStormBackupMode 
+                                          : () {
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                                content: Text('權限不足，無法執行此功能'),
+                                                backgroundColor: Colors.orange
+                                              ));
+                                            }),
+                                  child: Text(
+                                    _isStormBackupMode ? '已開啟「惡劣天氣備援模式」' : '開啟「惡劣天氣備援模式」', 
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.65), 
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('📍 未來24小時天氣預測', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal)),
+                                  IconButton(
+                                    icon: const Icon(Icons.refresh, color: Colors.teal, size: 20),
+                                    constraints: const BoxConstraints(),
+                                    padding: EdgeInsets.zero,
+                                    onPressed: _fetchAddressAnd3HourForecast,
+                                  )
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text('設備安裝區域：$_currentAddress', style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 12), 
+
+                              _isLoadingWeather
+                                  ? const Center(child: Padding(padding: EdgeInsets.all(20.0), child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal))))
+                                  : _forecastList.isEmpty
+                                      ? Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.all(20),
+                                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
+                                          child: const Text('「尚未設定安裝區域」或「無法取得當前區域預報」', style: TextStyle(color: Colors.black54, fontSize: 13), textAlign: TextAlign.center),
+                                        )
+                                      : SizedBox(
+                                          height: 90, 
+                                          child: ListView.builder(
+                                            scrollDirection: Axis.horizontal, 
+                                            itemCount: _forecastList.length,
+                                            itemBuilder: (context, index) {
+                                              final item = _forecastList[index];
+                                              final String wx = item['wx'] ?? '';
+
+                                              return Container(
+                                                width: 76, 
+                                                margin: const EdgeInsets.only(right: 8),
+                                                child: Column(
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    Text(item['time'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
+                                                    const SizedBox(height: 8), 
+                                                    Icon(_getWeatherIcon(wx), color: _getWeatherIconColor(wx), size: 30), 
+                                                    const SizedBox(height: 8), 
+                                                    Text(item['temp'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 13)),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                  ],
                 ),
               ),
             ),
-
-            const SizedBox(height: 24),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('📍 安裝地點未來24小時預測', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
-                IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.teal, size: 18),
-                  onPressed: _fetchAddressAnd3HourForecast,
-                )
-              ],
-            ),
-            Text('綁定地址：$_currentAddress', style: const TextStyle(fontSize: 11, color: Colors.teal, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-
-            _isLoadingWeather
-                ? const Center(child: Padding(padding: EdgeInsets.all(20.0), child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal))))
-                : _forecastList.isEmpty
-                    ? Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
-                        child: const Text('尚未設定安裝地址或無法取得當前區域預報。', style: TextStyle(color: Colors.black38, fontSize: 12), textAlign: TextAlign.center),
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _forecastList.length,
-                        itemBuilder: (context, index) {
-                          final item = _forecastList[index];
-                          final String wx = item['wx'] ?? '';
-
-                          return Card(
-                            elevation: 1,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(_getWeatherIcon(wx), color: _getWeatherIconColor(wx), size: 24),
-                              title: Text('${item['time']} 起 - $wx', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
-                              subtitle: Text('降雨機率: ${item['pop']}', style: const TextStyle(color: Colors.blueAccent, fontSize: 11)),
-                              trailing: Text(item['temp'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54, fontSize: 12)),
-                            ),
-                          );
-                        },
-                      ),
           ],
         ),
       ),
@@ -961,6 +1058,9 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
   }
 }
 
+// ==========================================
+// 5. 設備資訊設定
+// ==========================================
 class DeviceInfoSettingsScreen extends StatefulWidget {
   final String deviceDbId;
   final bool isRootOrOwner; 
@@ -1015,13 +1115,19 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
 
       final data = await Supabase.instance.client
           .from('devices')
-          .select('sn, address, install_date')
+          .select('sn, address, created_at')
           .eq('id', widget.deviceDbId)
           .single();
 
       setState(() {
         _snController.text = data['sn'] ?? '';
-        _dateController.text = data['install_date'] ?? "${DateTime.now().year}/${DateTime.now().month}/${DateTime.now().day}";
+        
+        if (data['created_at'] != null) {
+          DateTime dt = DateTime.parse(data['created_at']);
+          _dateController.text = "${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}";
+        } else {
+          _dateController.text = "尚未紀錄";
+        }
 
         String addr = data['address'] ?? '';
         for (var city in _taiwanLocations.keys) {
@@ -1035,14 +1141,14 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
       });
     } catch (e) {
       setState(() {
-        _dateController.text = "${DateTime.now().year}/${DateTime.now().month}/${DateTime.now().day}";
+        _dateController.text = "尚未紀錄";
       });
     }
   }
 
   Future<void> _saveDeviceSpecsToSupabase() async {
     if (widget.deviceDbId.isEmpty || _selectedCity == null || _selectedDistrict == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請選擇完整的縣市與地區！')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請選擇完整的縣市與行政區')));
       return;
     }
 
@@ -1052,12 +1158,11 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
 
       await Supabase.instance.client.from('devices').update({
         'address': fullAddress,
-        'install_date': _dateController.text.trim(),
       }).eq('id', widget.deviceDbId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('安裝資訊已成功儲存！'),
+          content: Text('設定完成'),
           backgroundColor: Colors.teal
         ));
         Navigator.pop(context);
@@ -1065,100 +1170,157 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('儲存失敗，請檢查網路連線。')));
     } finally {
-      setState(() { _isSaving = false; });
+      if (mounted) setState(() { _isSaving = false; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      extendBodyBehindAppBar: true, 
+      extendBody: true, 
+      backgroundColor: Colors.transparent, 
       appBar: AppBar(
-        title: const Text('設備資訊設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent, 
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color:Colors.white), onPressed: () => Navigator.pop(context)),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: SizedBox.expand(
+        child: Stack(
           children: [
-            TextField(
-              controller: _snController,
-              readOnly: true,
-              style: const TextStyle(fontSize: 13, color: Colors.black54),
-              decoration: const InputDecoration(
-                labelText: '產品序號 (SN)',
-                prefixIcon: Icon(Icons.qr_code_scanner_rounded, size: 18),
-                border: OutlineInputBorder(),
-                filled: true,
-                fillColor: Color(0xFFF5F5F5),
+            Positioned.fill(
+              child: Image.asset(
+                'assets/deviceinfo_full_bg.png', 
+                fit: BoxFit.cover,
               ),
             ),
-            const SizedBox(height: 20),
+            
+            SafeArea(
+              bottom: false, 
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 160),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.65), 
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                          ),
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('設備基本資訊', style: TextStyle(fontSize: 15, color: Colors.teal, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 20),
+                              
+                              TextField(
+                                controller: _snController,
+                                readOnly: true,
+                                style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.w600),
+                                decoration: InputDecoration(
+                                  labelText: '產品序號(SN)',
+                                  labelStyle: const TextStyle(color: Colors.teal),
+                                  prefixIcon: const Icon(Icons.qr_code_scanner_rounded, size: 18, color: Colors.teal),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                  filled: true,
+                                  fillColor: Colors.white.withValues(alpha: 0.6),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
 
-            DropdownButtonFormField<String>(
-              initialValue: _selectedCity,
-              hint: const Text("選擇縣市"),
-              items: _taiwanLocations.keys.map((city) => DropdownMenuItem<String>(value: city, child: Text(city))).toList(),
-              onChanged: (val) {
-                setState(() {
-                  _selectedCity = val;
-                  _selectedDistrict = null;
-                });
-              },
-              decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '縣市'),
-            ),
-            const SizedBox(height: 14),
+                              TextField(
+                                controller: _dateController,
+                                readOnly: true, 
+                                style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.w600),
+                                decoration: InputDecoration(
+                                  labelText: '啟用日期',
+                                  labelStyle: const TextStyle(color: Colors.teal),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                  filled: true,
+                                  fillColor: Colors.white.withValues(alpha: 0.6),
+                                  prefixIcon: const Icon(Icons.calendar_today_rounded, color: Colors.teal, size: 18),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              const Divider(color: Colors.black12, height: 24),
 
-            DropdownButtonFormField<String>(
-              initialValue: _selectedDistrict,
-              hint: const Text("選擇地區"),
-              items: (_selectedCity == null ? <String>[] : _taiwanLocations[_selectedCity]!)
-                  .map((dist) => DropdownMenuItem<String>(value: dist, child: Text(dist)))
-                  .toList(),
-              onChanged: (val) => setState(() => _selectedDistrict = val),
-              decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '地區'),
-            ),
-            const SizedBox(height: 20),
+                              const Text('設備安裝區域', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 12),
 
-            TextField(
-              controller: _dateController,
-              decoration: InputDecoration(
-                labelText: '安裝日期 (YYYY/MM/DD)',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.calendar_month, color: Colors.teal),
-                  onPressed: () async {
-                    final picked = await showDatePicker(
-                      context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035)
-                    );
-                    if (picked != null) {
-                      setState(() {
-                        _dateController.text = "${picked.year}/${picked.month}/${picked.day}";
-                      });
-                    }
-                  },
+                              DropdownButtonFormField<String>(
+                                initialValue: _selectedCity,
+                                hint: const Text("請選擇所在縣市"),
+                                items: _taiwanLocations.keys.map((city) => DropdownMenuItem<String>(value: city, child: Text(city))).toList(),
+                                onChanged: (val) {
+                                  setState(() {
+                                    _selectedCity = val;
+                                    _selectedDistrict = null;
+                                  });
+                                },
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                  filled: true,
+                                  fillColor: Colors.white.withValues(alpha: 0.6),
+                                  labelText: '縣/市'
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+
+                              DropdownButtonFormField<String>(
+                                key: ValueKey(_selectedCity),
+                                initialValue: _selectedDistrict,
+                                hint: const Text("請選擇所在行政區"),
+                                items: (_selectedCity == null ? <String>[] : _taiwanLocations[_selectedCity]!)
+                                    .map((dist) => DropdownMenuItem<String>(value: dist, child: Text(dist)))
+                                    .toList(),
+                                onChanged: (val) => setState(() => _selectedDistrict = val),
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                                  filled: true,
+                                  fillColor: Colors.white.withValues(alpha: 0.6),
+                                  labelText: '行政區'
+                                ),
+                              ),
+                              
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 16),
+
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal, 
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 2,
+                      ),
+                      onPressed: _isSaving 
+                          ? null 
+                          : (widget.isRootOrOwner 
+                              ? _saveDeviceSpecsToSupabase 
+                              : () {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                    content: Text('權限不足，無法執行此功能'),
+                                    backgroundColor: Colors.orange
+                                  ));
+                                }),
+                      child: Text(_isSaving ? '儲存中...' : '儲存變更', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                    ),
+                    const SizedBox(height: 40), 
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 30),
-
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14)),
-              onPressed: _isSaving 
-                  ? null 
-                  : (widget.isRootOrOwner 
-                      ? _saveDeviceSpecsToSupabase 
-                      : () {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                            content: Text('權限不足：僅擁有者或系統管理員(root)可執行此功能。'),
-                            backgroundColor: Colors.orange
-                          ));
-                        }),
-              child: Text(_isSaving ? '儲存中...' : '儲存設定', style: const TextStyle(color: Colors.white)),
-            )
           ],
         ),
       ),
@@ -1166,6 +1328,9 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
   }
 }
 
+// ==========================================
+// 6. 管理員權限設定
+// ==========================================
 class AdminPromotionScreen extends StatefulWidget {
   const AdminPromotionScreen({super.key});
 
@@ -1188,8 +1353,9 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('撤銷權限確認', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Text('確定要將 $email 降級為一般使用者嗎？\n對方將立即失去全系統設備的檢視與操作權限。'),
+          content: Text('確定要將 $email 降級為一般使用者嗎？\n對方將立即失去全系統設備的檢視與操作權限。', style: const TextStyle(height: 1.5)),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
             TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('確定撤銷', style: TextStyle(color: Colors.red))),
@@ -1229,46 +1395,45 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('管理員權限設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        title: const Text('管理員權限', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.withValues(alpha: 0.3))),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(16)),
               child: const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.admin_panel_settings_rounded, color: Colors.redAccent, size: 20),
-                  SizedBox(width: 10),
+                  Icon(Icons.admin_panel_settings_rounded, color: Colors.redAccent, size: 24),
+                  SizedBox(width: 12),
                   Expanded(
-                    child: Text('升級為管理員後，該帳號將獲得最高權限。若撤銷權限，該帳號將恢復為僅能檢視自己設備的一般使用者。', style: TextStyle(fontSize: 12, color: Colors.redAccent, height: 1.5, fontWeight: FontWeight.bold)),
+                    child: Text('升級權限，該帳號將獲得系統管理員權限。若撤銷權限，該帳號將恢復一般使用者權限', style: TextStyle(fontSize: 13, color: Colors.redAccent, height: 1.5, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            const Text('輸入欲設定的帳號 Email：', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
-            const SizedBox(height: 12),
+            const SizedBox(height: 32),
+            const Text('輸入欲設定的帳號(電子郵件)：', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+            const SizedBox(height: 16),
             TextField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
               decoration: InputDecoration(
                 hintText: 'example@email.com',
                 prefixIcon: const Icon(Icons.email_outlined, color: Colors.teal),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.teal, width: 2)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 filled: true,
-                fillColor: const Color(0xFFF9F9F9),
+                fillColor: const Color(0xFFF5F5F5),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
             
             Row(
               children: [
@@ -1277,12 +1442,12 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.teal, 
                       padding: const EdgeInsets.symmetric(vertical: 14), 
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
                     ),
                     onPressed: _isProcessing ? null : () => _changeAdminRole(true),
                     child: _isProcessing 
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('指派為管理員', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      : const Text('升級權限', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1293,12 +1458,12 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
                       foregroundColor: Colors.redAccent,
                       padding: const EdgeInsets.symmetric(vertical: 14), 
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(12),
                         side: BorderSide(color: _isProcessing ? Colors.grey : Colors.redAccent)
                       )
                     ),
                     onPressed: _isProcessing ? null : () => _changeAdminRole(false),
-                    child: const Text('撤銷管理員', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    child: const Text('撤銷權限', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   ),
                 ),
               ],
@@ -1310,100 +1475,438 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
   }
 }
 
+// ==========================================
+// 7. 設備進階設定選單
+// ==========================================
 class DeviceAdvancedSettingsScreen extends StatelessWidget {
   final String deviceDbId;
   final String inverterSn;
   final bool isRootOrOwner; 
+  final bool isRoot; 
 
   const DeviceAdvancedSettingsScreen({
     super.key, 
     required this.deviceDbId, 
     required this.inverterSn, 
-    required this.isRootOrOwner
+    required this.isRootOrOwner,
+    this.isRoot = false,
   });
 
   void _promptDtuPassword(BuildContext context) {
     final TextEditingController pwdController = TextEditingController();
+    bool isPasswordVisible = false; 
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('需要密碼授權', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: pwdController,
-          obscureText: true,
-          decoration: const InputDecoration(
-            hintText: '請輸入通訊模組更換密碼',
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.teal)),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AlertDialog(
+              backgroundColor: Colors.black.withValues(alpha: 0.6),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+              ),
+              title: const Text('需要密碼授權', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+              content: TextField(
+                controller: pwdController,
+                obscureText: !isPasswordVisible, 
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: '請輸入通訊模組更換密碼',
+                  hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+                  enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      isPasswordVisible ? Icons.visibility : Icons.visibility_off, 
+                      color: Colors.white54
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        isPasswordVisible = !isPasswordVisible; 
+                      });
+                    },
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+                TextButton(
+                  onPressed: () {
+                    if (pwdController.text == 'ftups84268760') {
+                      Navigator.pop(dialogContext); 
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => DtuReplacementScreen(deviceDbId: deviceDbId, inverterSn: inverterSn)
+                      ));
+                    } else {
+                      Navigator.pop(dialogContext); 
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('授權密碼錯誤，拒絕存取！'), backgroundColor: Colors.redAccent));
+                    }
+                  },
+                  child: const Text('確認執行', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold)),
+                )
+              ]
+            ),
+          );
+        }
+      )
+    );
+  }
+
+  void _promptTransferDevice(BuildContext context) {
+    final TextEditingController emailController = TextEditingController();
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AlertDialog(
+              backgroundColor: Colors.black.withValues(alpha: 0.6),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+              ),
+              title: const Row(
+                children: [
+                  Icon(Icons.send_to_mobile_rounded, color: Colors.orangeAccent),
+                  SizedBox(width: 8),
+                  Text('設備移轉', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('請輸入接收者的註冊帳號(電子郵件)，系統將產生一組6位數接收碼。', style: TextStyle(fontSize: 13, color: Colors.white70, height: 1.5)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: '接收帳號(電子郵件)',
+                      labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
+                      prefixIcon: Icon(Icons.email_outlined, color: Colors.orangeAccent),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
+                  child: const Text('取消', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                  onPressed: isProcessing 
+                    ? null 
+                    : () async {
+                        final targetEmail = emailController.text.trim();
+                        if (targetEmail.isEmpty) return;
+                        setState(() => isProcessing = true);
+
+                        try {
+                          final response = await Supabase.instance.client.rpc(
+                            'initiate_device_transfer',
+                            params: {'p_device_id': deviceDbId, 'p_target_email': targetEmail},
+                          );
+
+                          if (!dialogContext.mounted) return;
+                          Navigator.pop(dialogContext);
+
+                          if (response['success'] == true) {
+                            _showVerificationCodeDialog(context, targetEmail, response['code']);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+                          }
+                        } catch (e) {
+                          if (dialogContext.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('連線異常，請稍後再試。'), backgroundColor: Colors.redAccent));
+                          }
+                        }
+                      },
+                  child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('產生接收碼', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                )
+              ],
+            ),
+          );
+        }
+      )
+    );
+  }
+
+  void _showVerificationCodeDialog(BuildContext parentContext, String targetEmail, String code) {
+    showDialog(
+      context: parentContext,
+      barrierDismissible: false,
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.black.withValues(alpha: 0.6),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+          ),
+          title: const Text('移轉請求已建立', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('請將以下代碼提供給 $targetEmail', style: const TextStyle(fontSize: 13, color: Colors.white70)),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(color: Colors.orangeAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.orangeAccent)),
+                child: Text(code, style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, letterSpacing: 8, color: Colors.orangeAccent)),
+              ),
+              const SizedBox(height: 20),
+              const Text('對方必須在24小時內輸入此代碼，設備才會正式移轉。在對方接收前，您仍保有設備控制權。', style: TextStyle(color: Colors.redAccent, fontSize: 11, height: 1.5)),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              onPressed: () => Navigator.of(context).pop(), 
+              child: const Text('我知道了', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+            )
+          ]
+        ),
+      )
+    );
+  }
+
+  void _promptForceTransfer(BuildContext context) {
+    final TextEditingController emailController = TextEditingController();
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AlertDialog(
+              backgroundColor: Colors.black.withValues(alpha: 0.6),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5),
+              ),
+              title: const Row(
+                children: [
+                  Icon(Icons.warning_rounded, color: Colors.redAccent),
+                  SizedBox(width: 8),
+                  Text('設備所有權強制移轉(root權限)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('警告：此操作將無條件立即轉移設備所有權，並清除所有分享紀錄。', style: TextStyle(fontSize: 12, color: Colors.white70, height: 1.5)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: '接收帳號(電子郵件)', 
+                      labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.redAccent))
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: isProcessing ? null : () => Navigator.pop(dialogContext), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                  onPressed: isProcessing 
+                    ? null 
+                    : () async {
+                        final targetEmail = emailController.text.trim();
+                        if (targetEmail.isEmpty) return;
+                        setState(() => isProcessing = true);
+
+                        try {
+                          final response = await Supabase.instance.client.rpc(
+                            'force_transfer_device_ownership',
+                            params: {'p_device_id': deviceDbId, 'p_target_email': targetEmail},
+                          );
+                          if (!dialogContext.mounted) return;
+                          
+                          if (response['success'] == true) {
+                            Navigator.pop(dialogContext);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
+                            Navigator.of(context).popUntil((route) => route.isFirst);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+                            setState(() => isProcessing = false);
+                          }
+                        } catch (e) {
+                          if (dialogContext.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('連線異常，請稍後再試。'), backgroundColor: Colors.redAccent));
+                            setState(() => isProcessing = false);
+                          }
+                        }
+                      },
+                  child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('強制移轉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                )
+              ],
+            ),
+          );
+        }
+      )
+    );
+  }
+
+  // 🎯 替換：每個選項現在都是獨立的毛玻璃卡片
+  // 🎯 替換：每個選項現在都是獨立的毛玻璃卡片，並加上立體陰影
+  Widget _buildGlassTile({
+    required BuildContext context,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required Color titleColor,
+    required VoidCallback onTap,
+    Color? bgColor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Container(
+        // 🎯 新增：外層加上與告警頁面一致的陰影參數
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: bgColor ?? Colors.white.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+              ),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                leading: Icon(icon, color: iconColor),
+                title: Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: titleColor)),
+                trailing: Icon(Icons.arrow_forward_ios_rounded, size: 14, color: titleColor == Colors.red ? Colors.redAccent : Colors.black26),
+                onTap: onTap,
+              ),
+            ),
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-          TextButton(
-            onPressed: () {
-              if (pwdController.text == 'ftups84268760') {
-                Navigator.pop(context); 
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (context) => DtuReplacementScreen(deviceDbId: deviceDbId, inverterSn: inverterSn)
-                ));
-              } else {
-                Navigator.pop(context); 
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('授權密碼錯誤，拒絕存取！'), backgroundColor: Colors.redAccent));
-              }
-            },
-            child: const Text('確認執行', style: TextStyle(color: Colors.teal)),
-          )
-        ]
-      )
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      extendBodyBehindAppBar: true, 
+      extendBody: true, 
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('進階設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            elevation: 1,
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: const Icon(Icons.battery_charging_full_rounded, color: Colors.teal),
-              title: const Text('電池參數設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
-              onTap: () {
-                if (!isRootOrOwner) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('權限不足：僅擁有者或系統管理員(root)可進入電池參數設定。'),
-                    backgroundColor: Colors.orange,
-                    duration: Duration(seconds: 2),
-                  ));
-                  return;
-                }
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (context) => BatteryParameterSettingsScreen(deviceDbId: deviceDbId, inverterSn: inverterSn)
-                ));
-              },
+      body: SizedBox.expand(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Image.asset('assets/menu_full_bg.png', fit: BoxFit.cover),
             ),
-          ),
-          const SizedBox(height: 20),
-          Card(
-            elevation: 1,
-            margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: const Icon(Icons.swap_horiz_rounded, color: Colors.redAccent),
-              title: const Text('通訊模組(DTU)更換', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
-              onTap: () => _promptDtuPassword(context),
+            SafeArea(
+              bottom: false,
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                children: [
+                  _buildGlassTile(
+                    context: context,
+                    icon: Icons.battery_charging_full_rounded,
+                    iconColor: Colors.teal,
+                    title: '電池參數',
+                    titleColor: Colors.black87,
+                    onTap: () {
+                      if (!isRootOrOwner) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('權限不足，無法執行此功能'),
+                          backgroundColor: Colors.orange,
+                          duration: Duration(seconds: 2),
+                        ));
+                        return;
+                      }
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => BatteryParameterSettingsScreen(deviceDbId: deviceDbId, inverterSn: inverterSn)
+                      ));
+                    },
+                  ),
+                  _buildGlassTile(
+                    context: context,
+                    icon: Icons.swap_horiz_rounded,
+                    iconColor: Colors.redAccent,
+                    title: '通訊模組(DTU)更換',
+                    titleColor: Colors.black87,
+                    onTap: () => _promptDtuPassword(context),
+                  ),
+                  _buildGlassTile(
+                    context: context,
+                    icon: Icons.send_to_mobile_rounded,
+                    iconColor: Colors.orange,
+                    title: '設備所有權移轉',
+                    titleColor: Colors.black87,
+                    onTap: () {
+                      if (!isRootOrOwner) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('權限不足，無法執行此功能'),
+                          backgroundColor: Colors.orange,
+                        ));
+                        return;
+                      }
+                      _promptTransferDevice(context);
+                    },
+                  ),
+                  if (isRoot) ...[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Divider(color: Colors.black12, height: 1),
+                    ),
+                    _buildGlassTile(
+                      context: context,
+                      icon: Icons.gavel_rounded,
+                      iconColor: Colors.red,
+                      title: '設備所有權強制移轉(root權限)',
+                      titleColor: Colors.red,
+                      bgColor: Colors.red.withValues(alpha: 0.15),
+                      onTap: () => _promptForceTransfer(context),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1415,9 +1918,9 @@ class SystemAdvancedSettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('系統進階設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        title: const Text('進階設定(root權限)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), onPressed: () => Navigator.pop(context)),
@@ -1425,12 +1928,17 @@ class SystemAdvancedSettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            elevation: 1,
+          Container(
             margin: const EdgeInsets.only(bottom: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))]
+            ),
             child: ListTile(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               leading: const Icon(Icons.admin_panel_settings, color: Colors.teal),
-              title: const Text('管理員權限設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              title: const Text('管理員權限設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
               subtitle: const Text('指派或撤銷系統管理員身分', style: TextStyle(fontSize: 12, color: Colors.black45)),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
               onTap: () {
@@ -1444,6 +1952,9 @@ class SystemAdvancedSettingsScreen extends StatelessWidget {
   }
 }
 
+// ==========================================
+// 8. 電池參數設定
+// ==========================================
 class BatteryParameterSettingsScreen extends StatefulWidget {
   final String deviceDbId;
   final String inverterSn;
@@ -1454,23 +1965,44 @@ class BatteryParameterSettingsScreen extends StatefulWidget {
 }
 
 class _BatteryParameterSettingsScreenState extends State<BatteryParameterSettingsScreen> {
-  bool _isLoading = false;
+  bool _isLoading = true; 
   MqttServerClient? _mqttClient;
   
-  int _maxAcChargeCurrent = 10;  
-  int _offGridDischargeSoc = 20; 
-  int _offGridRecoverySoc = 30;  
-  int _onGridDischargeSoc = 30;  
-  int _onGridRecoverySoc = 40;   
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _isOnline = true;
+
+  int? _maxAcChargeCurrent;  
+  int? _offGridDischargeSoc; 
+  int? _offGridRecoverySoc;  
+  int? _onGridDischargeSoc;  
+  int? _onGridRecoverySoc; 
 
   @override
   void initState() {
     super.initState();
     _setupDirectMqtt();
+
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
+      final bool hasNetwork = !result.contains(ConnectivityResult.none);
+      
+      if (!hasNetwork && _isOnline) {
+        _isOnline = false;
+        debugPrint('⚠️ 網路斷開，主動中斷 MQTT 殭屍連線');
+        _mqttClient?.disconnect();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('網路連線中斷，暫停讀取'), backgroundColor: Colors.orange));
+        
+      } else if (hasNetwork && !_isOnline) {
+        _isOnline = true;
+        debugPrint('🌐 網路恢復，嘗試重新連線 MQTT');
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('網路已恢復，重新連線中...'), backgroundColor: Colors.teal));
+        _setupDirectMqtt();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel(); 
     _mqttClient?.disconnect(); 
     super.dispose();
   }
@@ -1494,6 +2026,8 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         
         _mqttClient!.subscribe('inverter/telemetry/${widget.inverterSn}', MqttQos.atMostOnce);
         
+        _queryDeviceSettings();
+
         _mqttClient!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
           final recMess = c![0].payload as MqttPublishMessage;
           final payloadString = String.fromCharCodes(recMess.payload.message);
@@ -1501,7 +2035,6 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
           if (payloadString.contains('^D092')) {
             final startIndex = payloadString.indexOf('^D092');
             final cleanString = payloadString.substring(startIndex);
-            // ignore: unused_element
             _parseBatsResponse(cleanString);
           }
         });
@@ -1509,6 +2042,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
     } catch (e) {
       debugPrint('❌ MQTT 連線失敗: $e');
       _mqttClient?.disconnect();
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -1521,21 +2055,15 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   }
 
   Future<void> _queryDeviceSettings() async {
-    setState(() => _isLoading = true);
     try {
       await Supabase.instance.client.functions.invoke(
         'send-device-command',
-        body: {'sn': widget.inverterSn, 'commands': ['^P005BATS\r']},
+        body: {'sn': widget.inverterSn, 'commands': ['^P005BATS\r']}, 
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('讀取中...'), backgroundColor: Colors.teal, duration: Duration(seconds: 2))
-        );
-      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('讀取失敗'), backgroundColor: Colors.redAccent));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('讀取失敗，請確認設備連線'), backgroundColor: Colors.redAccent));
     } finally {
-      Future.delayed(const Duration(seconds: 3), () {
+      Future.delayed(const Duration(seconds: 4), () {
         if (mounted && _isLoading) setState(() => _isLoading = false);
       });
     }
@@ -1562,7 +2090,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('參數已成功讀取'), backgroundColor: Colors.teal)
+            const SnackBar(content: Text('已成功讀取參數'), backgroundColor: Colors.teal)
           );
         }
       }
@@ -1572,9 +2100,14 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   }
 
   Future<void> _sendAcChargeCurrent() async {
+    if (_maxAcChargeCurrent == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請稍等...'), backgroundColor: Colors.orange));
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
-      String currentStr = (_maxAcChargeCurrent * 10).toString().padLeft(4, '0');
+      String currentStr = (_maxAcChargeCurrent! * 10).toString().padLeft(4, '0');
       await Supabase.instance.client.functions.invoke(
         'send-device-command',
         body: {'sn': widget.inverterSn, 'commands': ['^S011MUCHGC$currentStr\r']},
@@ -1588,12 +2121,17 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   }
 
   Future<void> _sendSocSettings() async {
+    if (_offGridDischargeSoc == null || _offGridRecoverySoc == null || _onGridDischargeSoc == null || _onGridRecoverySoc == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先等待讀取或設定所有參數'), backgroundColor: Colors.orange));
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
-      String aaaStr = _offGridDischargeSoc.toString().padLeft(3, '0');
-      String bbbStr = _offGridRecoverySoc.toString().padLeft(3, '0');
-      String cccStr = _onGridDischargeSoc.toString().padLeft(3, '0');
-      String dddStr = _onGridRecoverySoc.toString().padLeft(3, '0');
+      String aaaStr = _offGridDischargeSoc!.toString().padLeft(3, '0');
+      String bbbStr = _offGridRecoverySoc!.toString().padLeft(3, '0');
+      String cccStr = _onGridDischargeSoc!.toString().padLeft(3, '0');
+      String dddStr = _onGridRecoverySoc!.toString().padLeft(3, '0');
       String cmd = '^S021BATDS$aaaStr,$bbbStr,$cccStr,$dddStr\r';
 
       await Supabase.instance.client.functions.invoke(
@@ -1616,7 +2154,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
           backgroundColor: color,
           foregroundColor: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 16),
         ),
         onPressed: onPressed,
@@ -1627,13 +2165,13 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
 
   Widget _buildControlRow({
     required String title,
-    required int value,
+    required int? value, 
     required List<int> options,
     required String unit,
     required Function(int?) onChanged,
     Widget? trailingAction,
   }) {
-    final safeValue = options.contains(value) ? value : options.first;
+    final safeValue = (value != null && options.contains(value)) ? value : null;
     
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
@@ -1649,15 +2187,17 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                 SizedBox(
                   height: 48,
                   child: DropdownButtonFormField<int>(
-                    initialValue: safeValue,
-                    icon: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
+                    key: ValueKey(safeValue), 
+                    initialValue: safeValue,  
+                    hint: Text('-- $unit', style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.bold)),
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Colors.teal),
                     decoration: InputDecoration(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                       filled: true,
                       fillColor: const Color(0xFFF5F5F5),
                     ),
-                    items: options.map((opt) => DropdownMenuItem(value: opt, child: Text('$opt $unit', style: const TextStyle(fontSize: 15, color: Colors.black87)))).toList(),
+                    items: options.map((opt) => DropdownMenuItem(value: opt, child: Text('$opt $unit', style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.bold)))).toList(),
                     onChanged: onChanged,
                   ),
                 ),
@@ -1676,9 +2216,9 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      backgroundColor: Colors.white, 
       appBar: AppBar(
-        title: const Text('電池參數', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        title: const Text('電池參數設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
@@ -1689,37 +2229,19 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
           ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.teal,
-                    backgroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.teal, width: 1.5),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  icon: const Icon(Icons.cloud_download_rounded, size: 20),
-                  label: const Text('讀取電池設定參數', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  onPressed: _queryDeviceSettings,
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.shade200, width: 1),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.all(20.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('充電設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal)),
-                      const Divider(color: Colors.black12, height: 24),
+                      const Text('充電設定', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const Divider(color: Color(0xFFF1F5F9), height: 32),
                       _buildControlRow(
                         title: '最大市電充電電流',
                         value: _maxAcChargeCurrent,
@@ -1728,7 +2250,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                         onChanged: (v) => setState(() => _maxAcChargeCurrent = v!),
                         trailingAction: _buildSendButton(
                           label: '設定', 
-                          color: Colors.green, 
+                          color: Colors.teal, 
                           onPressed: _sendAcChargeCurrent
                         ),
                       ),
@@ -1737,34 +2259,39 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
 
-              Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.shade200, width: 1),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))]
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.all(20.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('SOC相關設定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal)),
-                      const Divider(color: Colors.black12, height: 24),
+                      const Text('SOC相關設定', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const Divider(color: Color(0xFFF1F5F9), height: 32),
                       
-                      const Text('無市電(Off-Grid)狀態', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)), 
-                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          const Icon(Icons.power_off_rounded, size: 18, color: Colors.blueAccent),
+                          const SizedBox(width: 8),
+                          const Text('無市電(Off-Grid)狀態', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                        ],
+                      ), 
+                      const SizedBox(height: 16),
                       _buildControlRow(
-                        title: '電池截止放電SOC',
+                        title: '電池截止放電 SOC',
                         value: _offGridDischargeSoc,
                         options: _generateList(0, 80, 5),
                         unit: '%',
                         onChanged: (v) => setState(() => _offGridDischargeSoc = v!),
                       ),
                       _buildControlRow(
-                        title: '電池重新放電SOC',
+                        title: '電池重新放電 SOC',
                         value: _offGridRecoverySoc,
                         options: _generateList(0, 80, 5),
                         unit: '%',
@@ -1772,32 +2299,39 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                       ),
 
                       const Padding(
-                        padding: EdgeInsets.only(bottom: 16.0),
-                        child: Divider(color: Colors.black12),
+                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        child: Divider(color: Color(0xFFF1F5F9)),
                       ),
 
-                      const Text('有市電(On-Grid)狀態', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)), 
-                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          const Icon(Icons.power_rounded, size: 18, color: Colors.orangeAccent),
+                          const SizedBox(width: 8),
+                          const Text('有市電(On-Grid)狀態', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
+                        ],
+                      ), 
+                      const SizedBox(height: 16),
                       _buildControlRow(
-                        title: '電池截止放電SOC',
+                        title: '電池截止放電 SOC',
                         value: _onGridDischargeSoc,
                         options: _generateList(5, 95, 5),
                         unit: '%',
                         onChanged: (v) => setState(() => _onGridDischargeSoc = v!),
                       ),
                       _buildControlRow(
-                        title: '電池重新放電SOC',
+                        title: '電池重新放電 SOC',
                         value: _onGridRecoverySoc,
                         options: _generateList(5, 100, 5),
                         unit: '%',
                         onChanged: (v) => setState(() => _onGridRecoverySoc = v!),
                       ),
 
-                      Align(
-                        alignment: Alignment.centerRight,
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
                         child: _buildSendButton(
                           label: '設定', 
-                          color: Colors.blueAccent, 
+                          color: Colors.teal, 
                           onPressed: _sendSocSettings
                         ),
                       ),

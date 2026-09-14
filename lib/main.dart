@@ -25,10 +25,15 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  await Supabase.initialize(
-    url: supabaseUrl, 
-    publishableKey: supabaseAnonKey,
-  );
+  // 🎯 優化：加入 try-catch 與 timeout，避免無網路時開機卡死
+  try {
+    await Supabase.initialize(
+      url: supabaseUrl, 
+      publishableKey: supabaseAnonKey,
+    ).timeout(const Duration(seconds: 5));
+  } catch (e) {
+    debugPrint('Supabase 初始化超時或無網路連線: $e');
+  }
 
   await NotificationService.init();
 
@@ -64,7 +69,6 @@ class _RootScreenState extends State<RootScreen> {
     _initializeAppAndCheckLogin();
   }
 
-  // 🎯 增強版：不僅上傳 Token，還加入了背景刷新監聽
   Future<void> _setupAndUploadFcmToken() async {
     try {
       NotificationSettings settings = await FirebaseMessaging.instance.requestPermission(
@@ -78,7 +82,6 @@ class _RootScreenState extends State<RootScreen> {
         final String? userId = Supabase.instance.client.auth.currentUser?.id;
 
         if (fcmToken != null && userId != null) {
-          // 1. 綁定當下最新的 Token
           await Supabase.instance.client
               .from('profiles')
               .update({'fcm_token': fcmToken})
@@ -86,7 +89,6 @@ class _RootScreenState extends State<RootScreen> {
           debugPrint('✅ FCM Token 註冊並上傳成功: $fcmToken');
         }
 
-        // 🎯 2. 新增防護：監聽 Firebase 在背景強制更換 Token 的事件
         FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
           final currentUserId = Supabase.instance.client.auth.currentUser?.id;
           if (currentUserId != null) {
@@ -112,7 +114,6 @@ class _RootScreenState extends State<RootScreen> {
     final bool autoLogin = prefs.getBool('auto_login') ?? false;
     final session = Supabase.instance.client.auth.currentSession;
 
-    // 情況 A：正常維持登入狀態
     if (autoLogin && session != null) {
       GlobalState.isPushNotificationEnabled = prefs.getBool('push_notifications_enabled') ?? true;
       GlobalState.isBackupProtectionEnabled = prefs.getBool('backup_protection_enabled') ?? true;
@@ -126,15 +127,12 @@ class _RootScreenState extends State<RootScreen> {
         });
       }
     } else {
-      // 🎯 情況 B：攔截「逾時登出」與「異常狀態」
       if (autoLogin && session == null) {
-        // 如果原本設定了自動登入，但現在卻沒有 Session，代表憑證已逾期！
         debugPrint('⚠️ 偵測到 Session 逾時登出，強制銷毀本地推播 Token');
         await FirebaseMessaging.instance.deleteToken();
         await prefs.setBool('auto_login', false); 
         
       } else if (!autoLogin && session != null) {
-        // 使用者沒勾選自動登入，卻殘留了 Session
         await Supabase.instance.client.auth.signOut();
         await FirebaseMessaging.instance.deleteToken();
       }
@@ -181,7 +179,6 @@ class _RootScreenState extends State<RootScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('auto_login', false);
         
-        // 🎯 雙重保險：手動登出時，除了 ProfileScreen 裡清空資料庫，也把本地 Token 銷毀
         await FirebaseMessaging.instance.deleteToken();
         await Supabase.instance.client.auth.signOut();
         
@@ -191,7 +188,6 @@ class _RootScreenState extends State<RootScreen> {
       });
     } else {
       return LoginScreen(onLoginSuccess: () {
-        // 手動登入成功時，觸發 Token 上傳
         _setupAndUploadFcmToken();
         
         setState(() {

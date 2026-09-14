@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class RawDataScreen extends StatefulWidget {
   final String deviceDbId;
@@ -15,24 +16,48 @@ class _RawDataScreenState extends State<RawDataScreen> {
   bool _isLoading = true;
   Map<String, dynamic>? _telemetryData;
   Map<String, dynamic>? _invPsData;
+  
   Timer? _liveTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _isOnline = true;
+  bool _isFetching = false; 
 
   @override
   void initState() {
     super.initState();
     _fetchLatestTelemetry();
-    _liveTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      _fetchLatestTelemetry(isSilent: true);
+    _startTimer();
+
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
+      final bool hasNetwork = !result.contains(ConnectivityResult.none);
+      if (!hasNetwork && _isOnline) {
+        _isOnline = false;
+        _liveTimer?.cancel();
+        debugPrint('⚠️ 明細數據頁斷網，停止刷新');
+      } else if (hasNetwork && !_isOnline) {
+        _isOnline = true;
+        _fetchLatestTelemetry();
+        _startTimer();
+      }
     });
+  }
+
+  void _startTimer() {
+    _liveTimer?.cancel();
+    _liveTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLatestTelemetry(isSilent: true));
   }
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     _liveTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _fetchLatestTelemetry({bool isSilent = false}) async {
+    if (_isFetching) return;
+    _isFetching = true;
+
     if (!isSilent) setState(() => _isLoading = true);
 
     try {
@@ -72,6 +97,8 @@ class _RawDataScreenState extends State<RawDataScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+    } finally {
+      _isFetching = false;
     }
   }
 
@@ -96,7 +123,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
     double totalPvWatts = (v1 * i1) + (v2 * i2);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Colors.white, 
       appBar: AppBar(
         systemOverlayStyle: SystemUiOverlayStyle.dark,
         title: const Text('數據明細', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -125,7 +152,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
               onRefresh: () => _fetchLatestTelemetry(),
               color: Colors.teal,
               child: ListView(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16), 
                 children: [
                   _buildExpandableCategory(
                     title: '電網 (Grid)',
@@ -137,7 +164,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
                       _buildDataRow('市電頻率', '${_telemetryData?['ac_in_freq'] ?? '--'} Hz'),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
 
                   _buildExpandableCategory(
                     title: '電池 (Battery)',
@@ -149,7 +176,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
                       _buildDataRow('充/放電電流', '${_telemetryData?['battery_current'] ?? '--'} A'),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
 
                   _buildExpandableCategory(
                     title: '太陽能 (Solar PV)',
@@ -163,7 +190,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
                       _buildDataRow('太陽能總功率', _telemetryData != null ? '${totalPvWatts.toStringAsFixed(1)} W' : '-- W'),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
 
                   _buildExpandableCategory(
                     title: '負載 (Load)',
@@ -176,7 +203,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
                       _buildDataRow('負載量', '${_invPsData?['ac_out_power_percentage'] ?? '--'} %'),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
 
                   _buildExpandableCategory(
                     title: '其他',
@@ -187,7 +214,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
                       _buildDataRow('最高組件溫度', '${_telemetryData?['comp_max_temp'] ?? '--'} ℃'),
                     ],
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
@@ -203,9 +230,14 @@ class _RawDataScreenState extends State<RawDataScreen> {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 4)],
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          )
+        ],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -220,7 +252,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
           children: [
             const Divider(color: Color(0xFFF1F5F9), height: 1),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(children: items),
             ),
           ],
@@ -255,7 +287,6 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
   DateTime _selectedDate = DateTime.now();
   DateTime? _earliestDataDate; 
   
-  // 🎯 替換：改用兩個整數變數，專門儲存「小時」(0~23)
   int _startHour = 0;
   int _endHour = 24;
 
@@ -306,7 +337,6 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
 
       final String dateFormatted = "${_selectedDate.year}-${_twoDigits(_selectedDate.month)}-${_twoDigits(_selectedDate.day)}";
       
-      // 🎯 修正：讓結束時間「退回一小時的 59分59秒」，實現「未達 15:00」的效果
       final String timeStartStr = "${_twoDigits(_startHour)}:00:00.000";
       String timeEndStr;
       if (_endHour == 0) {
@@ -372,7 +402,6 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     }
   }
 
-  // 🎯 替換：重置為預設小時的函數
   void _resetTimeRange() {
     _startHour = 0;
     _endHour = 24;
@@ -434,10 +463,8 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     _fetchHistoryLogs();
   }
 
-  // 🎯 新增：建立精美下拉式選單的 Helper Function
   Widget _buildHourDropdown(bool isStart) {
     int currentValue = isStart ? _startHour : _endHour;
-    // 🎯 修正：開始時間 0~23 (共 24 個選項)，結束時間 0~24 (共 25 個選項)
     int itemCount = isStart ? 24 : 25; 
 
     return Container(
@@ -446,7 +473,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.grey[300]!),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<int>(
@@ -464,11 +491,9 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
               setState(() {
                 if (isStart) {
                   _startHour = newValue;
-                  // 防呆：如果開始時間晚於結束時間，同步後延
                   if (_startHour > _endHour) _endHour = _startHour;
                 } else {
                   _endHour = newValue;
-                  // 防呆：如果結束時間早於開始時間，同步前移
                   if (_endHour < _startHour) _startHour = _endHour;
                 }
               });
@@ -514,11 +539,16 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
           ),
           const SizedBox(height: 10),
 
-          // 📅 第一列：日期切換器
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[300]!)),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white, 
+              borderRadius: BorderRadius.circular(30), 
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))
+              ]
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -526,7 +556,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
                   onTap: _goPrevDay,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    child: Icon(Icons.chevron_left_rounded, size: 24, color: isPrevDisabled ? Colors.grey[400] : Colors.teal)
+                    child: Icon(Icons.chevron_left_rounded, size: 24, color: isPrevDisabled ? Colors.grey[300] : Colors.teal)
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -539,15 +569,14 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
                   onTap: _goNextDay,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    child: Icon(Icons.chevron_right_rounded, size: 24, color: isNextDisabled ? Colors.grey[400] : Colors.teal)
+                    child: Icon(Icons.chevron_right_rounded, size: 24, color: isNextDisabled ? Colors.grey[300] : Colors.teal)
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
 
-          // 🕒 替換：第二列改為下拉選單
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -588,7 +617,11 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
                               label: Text(timeStr, style: TextStyle(color: isSelected ? Colors.white : Colors.black87, fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                               selected: isSelected,
                               selectedColor: Colors.teal,
-                              backgroundColor: Colors.grey[100],
+                              backgroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20), 
+                                side: BorderSide(color: isSelected ? Colors.teal : Colors.grey.shade200)
+                              ),
                               onSelected: (val) {
                                 setState(() { 
                                   _selectedLog = log;
@@ -613,21 +646,21 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
                         '🕒 紀錄時間：${_formatFullDateTime(_selectedLog!['created_at']?.toString())}', 
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal)
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
                       _buildHistoryCategoryCard('⚡ 電網 (Grid)', [
                         _buildMetricItem('L1 市電電壓', '${_selectedLog!['ac_in_v_r'] ?? '--'} V'),
                         _buildMetricItem('L2 市電電壓', '${_selectedLog!['ac_in_v_s'] ?? '--'} V'),
                         _buildMetricItem('市電頻率', '${_selectedLog!['ac_in_freq'] ?? '--'} Hz'),
                       ]),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
 
                       _buildHistoryCategoryCard('🔋 電池 (Battery)', [
                         _buildMetricItem('電池容量 (SOC)', '${_selectedLog!['battery_capacity'] ?? '--'} %'),
                         _buildMetricItem('電池電壓', '${_selectedLog!['battery_voltage'] ?? '--'} V'),
                         _buildMetricItem('充/放電電流', '${_selectedLog!['battery_current'] ?? '--'} A'),
                       ]),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
 
                       _buildHistoryCategoryCard('☀️ 太陽能 (Solar PV)', [
                         _buildMetricItem('Solar 1 電壓', '${_selectedLog!['pv1_voltage'] ?? '--'} V'),
@@ -635,7 +668,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
                         _buildMetricItem('Solar 2 電壓', '${_selectedLog!['pv2_voltage'] ?? '--'} V'),
                         _buildMetricItem('Solar 2 電流', '${_selectedLog!['pv2_current'] ?? '--'} A'),
                       ]),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
 
                       _buildHistoryCategoryCard('🏠 負載 (Load)', [
                         _buildMetricItem('L1 輸出電壓', '${_selectedLog!['ac_out_v_r'] ?? '--'} V'),
@@ -653,13 +686,23 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
 
   Widget _buildHistoryCategoryCard(String title, List<Widget> children) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey[200]!)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(16), 
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04), 
+            blurRadius: 10, 
+            offset: const Offset(0, 4)
+          )
+        ]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Column(children: children),
         ],
       ),
@@ -668,12 +711,12 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
 
   Widget _buildMetricItem(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.black54, fontSize: 11)),
-          Text(value, style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(label, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+          Text(value, style: const TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -688,38 +731,65 @@ class AlarmListScreen extends StatefulWidget {
   State<AlarmListScreen> createState() => _AlarmListScreenState();
 }
 
-class _AlarmListScreenState extends State<AlarmListScreen> {
+class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProviderStateMixin {
   bool _isLoading = true;
   List<Map<String, dynamic>> _alarmList = [];
-  Timer? _alarmTimer;
-
+  List<Map<String, dynamic>> _faultList = []; // 🎯 新增：錯誤清單
   String _filterMode = '全部'; 
+  
+  late TabController _tabController; // 🎯 新增：標籤控制器
+  Timer? _alarmTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _isOnline = true;
+  bool _isFetching = false;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _fetchAlarmsFromSupabase();
-    _alarmTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      _fetchAlarmsFromSupabase(isSilent: true);
+    _startTimer();
+
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
+      final bool hasNetwork = !result.contains(ConnectivityResult.none);
+      if (!hasNetwork && _isOnline) {
+        _isOnline = false;
+        _alarmTimer?.cancel();
+      } else if (hasNetwork && !_isOnline) {
+        _isOnline = true;
+        _fetchAlarmsFromSupabase();
+        _startTimer();
+      }
     });
+  }
+
+  void _startTimer() {
+    _alarmTimer?.cancel();
+    _alarmTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchAlarmsFromSupabase(isSilent: true));
   }
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     _alarmTimer?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
-  List<Map<String, dynamic>> get _filteredAlarmList {
+  // 🎯 共用的過濾邏輯
+  List<Map<String, dynamic>> _getFilteredList(List<Map<String, dynamic>> sourceList) {
     if (_filterMode == '處理中') {
-      return _alarmList.where((alarm) => alarm['is_active'] == true).toList();
+      return sourceList.where((alarm) => alarm['is_active'] == true).toList();
     } else if (_filterMode == '已解除') {
-      return _alarmList.where((alarm) => alarm['is_active'] == false).toList();
+      return sourceList.where((alarm) => alarm['is_active'] == false).toList();
     }
-    return _alarmList; 
+    return sourceList; 
   }
 
   Future<void> _fetchAlarmsFromSupabase({bool isSilent = false}) async {
+    if (_isFetching) return;
+    _isFetching = true;
+
     if (!isSilent) setState(() => _isLoading = true);
 
     try {
@@ -737,30 +807,43 @@ class _AlarmListScreenState extends State<AlarmListScreen> {
 
       final List<dynamic> alarmLogs = await Supabase.instance.client
           .from('device_alarms')
-          .select('alarm_message, is_active, created_at_tw, resolved_at_tw, created_at')
+          .select('alarm_code, alarm_message, is_active, created_at_tw, resolved_at_tw, created_at')
           .eq('device_id', sn)
           .order('created_at', ascending: false) 
-          .limit(50);
+          .limit(100);
 
       List<Map<String, dynamic>> parsedAlarms = [];
+      List<Map<String, dynamic>> parsedFaults = [];
 
       for (var log in alarmLogs) {
-        parsedAlarms.add({
+        // 🎯 核心判斷：如果 alarm_code 都是數字，代表它是系統錯誤 (Faults 01-32)
+        final bool isFault = RegExp(r'^[0-9]+$').hasMatch(log['alarm_code'] ?? '');
+        
+        final item = {
           'time': log['created_at_tw'] ?? '',
           'resolved_time': log['resolved_at_tw'] ?? '',
-          'status': log['alarm_message'] ?? '未知告警',
+          'status': log['alarm_message'] ?? '未知狀態',
           'is_active': log['is_active'] == true,
-        });
+        };
+
+        if (isFault) {
+          parsedFaults.add(item);
+        } else {
+          parsedAlarms.add(item);
+        }
       }
 
       if (mounted) {
         setState(() {
           _alarmList = parsedAlarms;
+          _faultList = parsedFaults;
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+    } finally {
+      _isFetching = false;
     }
   }
 
@@ -784,8 +867,11 @@ class _AlarmListScreenState extends State<AlarmListScreen> {
           ),
           selected: isSelected,
           selectedColor: Colors.teal,
-          backgroundColor: Colors.grey[100],
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: isSelected ? Colors.teal : Colors.grey.shade200)
+          ),
           showCheckmark: false,
           onSelected: (bool selected) {
             if (selected) {
@@ -799,150 +885,179 @@ class _AlarmListScreenState extends State<AlarmListScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text('系統告警與歷史紀錄', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal)))
-          : Column(
+  // 🎯 共用的列表渲染元件
+  Widget _buildListView(List<Map<String, dynamic>> sourceList, String emptyMessage) {
+    final filteredList = _getFilteredList(sourceList);
+
+    return RefreshIndicator(
+      onRefresh: () => _fetchAlarmsFromSupabase(),
+      color: Colors.teal,
+      child: sourceList.isEmpty
+          ? ListView(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  color: Colors.white,
-                  child: Row(
+                const SizedBox(height: 120),
+                Center(
+                  child: Column(
                     children: [
-                      _buildFilterChip('全部'),
-                      _buildFilterChip('處理中'),
-                      _buildFilterChip('已解除'),
+                      const Icon(Icons.check_circle_outline_rounded, color: Colors.green, size: 48),
+                      const SizedBox(height: 12),
+                      Text('太棒了！儲能系統運轉順暢，無任何$emptyMessage紀錄。', style: const TextStyle(color: Colors.black45, fontSize: 13)),
                     ],
                   ),
                 ),
-                
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: () => _fetchAlarmsFromSupabase(),
-                    color: Colors.teal,
-                    child: _alarmList.isEmpty
-                        ? ListView(
-                            children: const [
-                              SizedBox(height: 120),
-                              Center(
-                                child: Column(
-                                  children: [
-                                    Icon(Icons.check_circle_outline_rounded, color: Colors.green, size: 48),
-                                    SizedBox(height: 12),
-                                    Text('太棒了！儲能系統運轉順暢，無任何告警紀錄。', style: TextStyle(color: Colors.black45, fontSize: 13)),
-                                  ],
-                                ),
-                              ),
-                            ],
+              ],
+            )
+          : filteredList.isEmpty
+              ? ListView(
+                  children: [
+                    const SizedBox(height: 120),
+                    Center(
+                      child: Column(
+                        children: [
+                          Icon(Icons.inbox_rounded, color: Colors.grey[300], size: 48),
+                          const SizedBox(height: 12),
+                          Text('目前沒有「$_filterMode」的$emptyMessage紀錄', style: const TextStyle(color: Colors.black45, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: filteredList.length,
+                  itemBuilder: (context, index) {
+                    final item = filteredList[index];
+                    final bool isActive = item['is_active'];
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isActive ? Colors.red.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4)
                           )
-                        : _filteredAlarmList.isEmpty
-                            ? ListView(
+                        ]
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: isActive ? Colors.red.withValues(alpha: 0.1) : Colors.green.withValues(alpha: 0.1),
+                              child: Icon(isActive ? Icons.error_outline : Icons.check_circle_outline, color: isActive ? Colors.red : Colors.green, size: 20),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const SizedBox(height: 120),
-                                  Center(
-                                    child: Column(
-                                      children: [
-                                        Icon(Icons.inbox_rounded, color: Colors.grey[300], size: 48),
-                                        const SizedBox(height: 12),
-                                        Text('目前沒有「$_filterMode」的告警紀錄', style: const TextStyle(color: Colors.black45, fontSize: 13)),
-                                      ],
+                                  Text(
+                                    item['status'],
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: isActive ? Colors.red[900] : Colors.black87,
                                     ),
                                   ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.access_time_rounded, size: 12, color: Colors.black38),
+                                      const SizedBox(width: 4),
+                                      Text('發生: ${item['time']}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
+                                    ],
+                                  ),
+                                  if (!isActive && item['resolved_time'].isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.task_alt_rounded, size: 12, color: Colors.teal),
+                                        const SizedBox(width: 4),
+                                        Text('解除: ${item['resolved_time']}', style: const TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.w500)),
+                                      ],
+                                    ),
+                                  ],
                                 ],
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.all(12),
-                                itemCount: _filteredAlarmList.length,
-                                itemBuilder: (context, index) {
-                                  final alarm = _filteredAlarmList[index];
-                                  final bool isActive = alarm['is_active'];
-
-                                  return Card(
-                                    color: isActive ? Colors.red[50] : Colors.grey[50],
-                                    elevation: 0,
-                                    margin: const EdgeInsets.only(bottom: 10),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      side: BorderSide(color: isActive ? Colors.red.shade300 : Colors.grey.shade300, width: isActive ? 1.5 : 1.0),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 16,
-                                            backgroundColor: isActive ? Colors.red : Colors.grey[400],
-                                            child: Icon(isActive ? Icons.error_outline : Icons.check_circle_outline, color: Colors.white, size: 18),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  alarm['status'],
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 14,
-                                                    color: isActive ? Colors.red[900] : Colors.black54,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 6),
-                                                Row(
-                                                  children: [
-                                                    const Icon(Icons.access_time_rounded, size: 12, color: Colors.black38),
-                                                    const SizedBox(width: 4),
-                                                    Text('發生: ${alarm['time']}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
-                                                  ],
-                                                ),
-                                                if (!isActive && alarm['resolved_time'].isNotEmpty) ...[
-                                                  const SizedBox(height: 2),
-                                                  Row(
-                                                    children: [
-                                                      const Icon(Icons.task_alt_rounded, size: 12, color: Colors.teal),
-                                                      const SizedBox(width: 4),
-                                                      Text('解除: ${alarm['resolved_time']}', style: const TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.w500)),
-                                                    ],
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: isActive ? Colors.red : Colors.grey[200],
-                                              borderRadius: BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              isActive ? '處理中' : '已解除',
-                                              style: TextStyle(
-                                                color: isActive ? Colors.white : Colors.black45,
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold
-                                              ),
-                                            ),
-                                          )
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
                               ),
-                  ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isActive ? Colors.red : Colors.grey[100],
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                isActive ? '處理中' : '已解除',
+                                style: TextStyle(
+                                  color: isActive ? Colors.white : Colors.black45,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold
+                                ),
+                              ),
+                            )
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              ],
-            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        backgroundColor: Colors.white, 
+        appBar: AppBar(
+          systemOverlayStyle: SystemUiOverlayStyle.dark,
+          title: const Text('系統告警與錯誤紀錄', style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.white,
+          elevation: 0,
+          automaticallyImplyLeading: false,
+          bottom: TabBar(
+            controller: _tabController,
+            indicatorColor: Colors.teal,
+            labelColor: Colors.teal,
+            unselectedLabelColor: Colors.black54,
+            labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            tabs: const [ Tab(text: '告警'), Tab(text: '錯誤') ],
+          ),
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal)))
+            : Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: Colors.white,
+                    child: Row(
+                      children: [
+                        _buildFilterChip('全部'),
+                        _buildFilterChip('處理中'),
+                        _buildFilterChip('已解除'),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildListView(_alarmList, '告警'),
+                        _buildListView(_faultList, '錯誤'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+      ),
     );
   }
 }

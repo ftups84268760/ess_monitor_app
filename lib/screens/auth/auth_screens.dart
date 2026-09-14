@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,13 +23,77 @@ class _LoginScreenState extends State<LoginScreen> {
   bool rememberPassword = false;
   bool autoLogin = false;
   bool _isLoading = false;
-  
   bool _obscurePassword = true;
+
+  bool _isServerConnected = false; 
+  Timer? _heartbeatTimer;
 
   @override
   void initState() {
     super.initState();
     _loadSavedCredentials();
+    _startHeartbeatCheck(); 
+  }
+
+  @override
+  void dispose() {
+    _heartbeatTimer?.cancel(); 
+    super.dispose();
+  }
+
+  void _startHeartbeatCheck() {
+    _checkConnection(); 
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _checkConnection();
+    });
+  }
+
+  Future<void> _checkConnection() async {
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+        if (!_isServerConnected && mounted) {
+          setState(() => _isServerConnected = true); 
+        }
+      }
+    } on SocketException catch (_) {
+      if (_isServerConnected && mounted) {
+        setState(() => _isServerConnected = false); 
+      }
+    }
+  }
+
+  Widget _buildConnectionStatusLight() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _isServerConnected ? Colors.greenAccent : Colors.redAccent,
+            boxShadow: [
+              BoxShadow(
+                color: (_isServerConnected ? Colors.greenAccent : Colors.redAccent).withValues(alpha: 0.6),
+                blurRadius: 8,
+                spreadRadius: 2,
+              )
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          _isServerConnected ? '已連線' : '無連線，請確認網路是否可用',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: _isServerConnected ? Colors.teal.shade700 : Colors.redAccent,
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _loadSavedCredentials() async {
@@ -42,6 +109,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
+    if (!_isServerConnected) {
+      _showErrorDialog('目前無網路連線，請檢查您的 WiFi 或行動網路設定。');
+      return;
+    }
+
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       _showErrorDialog('請輸入電子郵件與密碼');
       return;
@@ -76,51 +148,57 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // 🎯 階段一：要求輸入電子郵件
   Future<void> _handleForgotPassword() async {
     final TextEditingController resetEmailController = TextEditingController();
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[850],
-        title: const Text('重設密碼', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: resetEmailController,
-          style: const TextStyle(color: Colors.white),
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: '請輸入您註冊的電子郵件',
-            labelStyle: TextStyle(color: Colors.white30, fontSize: 12),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.black.withValues(alpha: 0.6), 
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5), 
           ),
+          title: const Text('重設密碼', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          content: TextField(
+            controller: resetEmailController,
+            style: const TextStyle(color: Colors.white),
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: '請輸入您註冊的電子郵件',
+              labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消', style: TextStyle(color: Colors.grey))
+            ),
+            TextButton(
+              onPressed: () async {
+                final emailText = resetEmailController.text.trim();
+                if (emailText.isEmpty) return;
+                
+                Navigator.pop(context); 
+                _sendOtpAndShowVerificationDialog(emailText); 
+              },
+              child: const Text('發送驗證碼', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold))
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消', style: TextStyle(color: Colors.grey))
-          ),
-          TextButton(
-            onPressed: () async {
-              final emailText = resetEmailController.text.trim();
-              if (emailText.isEmpty) return;
-              
-              Navigator.pop(context); // 關閉信箱輸入框
-              _sendOtpAndShowVerificationDialog(emailText); // 進入階段二
-            },
-            child: const Text('發送驗證碼', style: TextStyle(color: Colors.tealAccent))
-          ),
-        ],
       ),
     );
   }
 
-  // 🎯 階段二：發送 OTP 並要求輸入驗證碼
   Future<void> _sendOtpAndShowVerificationDialog(String email) async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     
     try {
-      // 呼叫 Supabase 發送包含 6 位數 Token 的信件
       await Supabase.instance.client.auth.resetPasswordForEmail(email);
       scaffoldMessenger.showSnackBar(const SnackBar(content: Text('驗證碼已發送至您的信箱！'), backgroundColor: Colors.teal));
     } catch (e) {
@@ -137,75 +215,82 @@ class _LoginScreenState extends State<LoginScreen> {
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) {
-          return AlertDialog(
-            backgroundColor: Colors.grey[850],
-            title: const Text('輸入驗證碼', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('我們已寄送8位數驗證碼至 $email', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: otpController,
-                  style: const TextStyle(color: Colors.white, letterSpacing: 4.0, fontSize: 18),
-                  keyboardType: TextInputType.number,
-                  textAlign: TextAlign.center,
-                  maxLength: 8,
-                  decoration: const InputDecoration(
-                    hintText: '00000000',
-                    hintStyle: TextStyle(color: Colors.white30),
-                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AlertDialog(
+              backgroundColor: Colors.black.withValues(alpha: 0.6),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+              ),
+              title: const Text('輸入驗證碼', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('我們已寄送8位數驗證碼至 $email', style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: otpController,
+                    style: const TextStyle(color: Colors.tealAccent, letterSpacing: 8.0, fontSize: 20, fontWeight: FontWeight.bold),
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    maxLength: 8,
+                    decoration: const InputDecoration(
+                      hintText: '00000000',
+                      hintStyle: TextStyle(color: Colors.white24, letterSpacing: 8.0),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                    ),
                   ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isVerifying ? null : () => Navigator.pop(context),
+                  child: const Text('取消', style: TextStyle(color: Colors.grey))
+                ),
+                TextButton(
+                  onPressed: isVerifying ? null : () async {
+                    final token = otpController.text.trim();
+                    if (token.length != 8) { 
+                      scaffoldMessenger.showSnackBar(const SnackBar(content: Text('請輸入完整的8位數驗證碼')));
+                      return;
+                    }
+
+                    setStateDialog(() { isVerifying = true; });
+
+                    try {
+                      await Supabase.instance.client.auth.verifyOTP(
+                        email: email,
+                        token: token,
+                        type: OtpType.recovery,
+                      );
+                      
+                      if (!context.mounted) return;
+                      Navigator.pop(context); 
+                      _showUpdatePasswordDialog(); 
+
+                    } on AuthException catch (e) {
+                      scaffoldMessenger.showSnackBar(SnackBar(content: Text('驗證失敗：${e.message}'), backgroundColor: Colors.redAccent));
+                    } catch (e) {
+                      scaffoldMessenger.showSnackBar(const SnackBar(content: Text('發生未知錯誤'), backgroundColor: Colors.redAccent));
+                    } finally {
+                      setStateDialog(() { isVerifying = false; });
+                    }
+                  },
+                  child: isVerifying
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.tealAccent, strokeWidth: 2))
+                    : const Text('驗證', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold))
                 ),
               ],
             ),
-            actions: [
-              TextButton(
-                onPressed: isVerifying ? null : () => Navigator.pop(context),
-                child: const Text('取消', style: TextStyle(color: Colors.grey))
-              ),
-              TextButton(
-                onPressed: isVerifying ? null : () async {
-                  final token = otpController.text.trim();
-                  if (token.length != 8) { 
-                    scaffoldMessenger.showSnackBar(const SnackBar(content: Text('請輸入完整的8位數驗證碼')));
-                    return;
-                  }
-
-                  setStateDialog(() { isVerifying = true; });
-
-                  try {
-                    // 驗證 OTP
-                    await Supabase.instance.client.auth.verifyOTP(
-                      email: email,
-                      token: token,
-                      type: OtpType.recovery,
-                    );
-                    
-                    if (!context.mounted) return;
-                    Navigator.pop(context); // 關閉 OTP 輸入框
-                    _showUpdatePasswordDialog(); // 驗證成功，進入階段三
-
-                  } on AuthException catch (e) {
-                    scaffoldMessenger.showSnackBar(SnackBar(content: Text('驗證失敗：${e.message}'), backgroundColor: Colors.redAccent));
-                  } catch (e) {
-                    scaffoldMessenger.showSnackBar(const SnackBar(content: Text('發生未知錯誤'), backgroundColor: Colors.redAccent));
-                  } finally {
-                    setStateDialog(() { isVerifying = false; });
-                  }
-                },
-                child: isVerifying
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.tealAccent, strokeWidth: 2))
-                  : const Text('驗證', style: TextStyle(color: Colors.tealAccent))
-              ),
-            ],
           );
         }
       ),
     );
   }
 
-  // 🎯 階段三：輸入新密碼 (已移除自動填入)
   void _showUpdatePasswordDialog() {
     final TextEditingController newPasswordController = TextEditingController();
     final TextEditingController confirmPasswordController = TextEditingController();
@@ -216,91 +301,97 @@ class _LoginScreenState extends State<LoginScreen> {
       barrierDismissible: false, 
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) {
-          return AlertDialog(
-            backgroundColor: Colors.grey[850],
-            title: const Text('設定全新密碼', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('驗證成功！請輸入您的新密碼。', style: TextStyle(color: Colors.tealAccent, fontSize: 12)),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: newPasswordController,
-                  obscureText: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: '新密碼 (最少 6 個字元)',
-                    labelStyle: TextStyle(color: Colors.white30, fontSize: 12),
-                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AlertDialog(
+              backgroundColor: Colors.black.withValues(alpha: 0.6),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+              ),
+              title: const Text('設定全新密碼', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('驗證成功，請輸入您的新密碼', style: TextStyle(color: Colors.tealAccent, fontSize: 13)),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: newPasswordController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: '新密碼(最少6個字元)',
+                      labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                    ),
                   ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: '再次確認新密碼',
+                      labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isUpdating ? null : () => Navigator.pop(context),
+                  child: const Text('取消', style: TextStyle(color: Colors.grey))
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: confirmPasswordController,
-                  obscureText: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: '再次確認新密碼',
-                    labelStyle: TextStyle(color: Colors.white30, fontSize: 12),
-                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
-                  ),
+                TextButton(
+                  onPressed: isUpdating ? null : () async {
+                    final p1 = newPasswordController.text.trim();
+                    final p2 = confirmPasswordController.text.trim();
+
+                    if (p1.isEmpty || p2.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼欄位不可為空')));
+                      return;
+                    }
+                    if (p1 != p2) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('兩次輸入的密碼不一致')));
+                      return;
+                    }
+                    if (p1.length < 6) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼長度至少需要6個字元')));
+                      return;
+                    }
+
+                    setStateDialog(() { isUpdating = true; });
+
+                    try {
+                      await Supabase.instance.client.auth.updateUser(UserAttributes(password: p1));
+                      
+                      if (!context.mounted) return;
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('密碼修改成功，請使用新密碼重新登入'), backgroundColor: Colors.teal)
+                      );
+                      
+                      await Supabase.instance.client.auth.signOut();
+                      
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('密碼更新失敗，請稍後再試'), backgroundColor: Colors.redAccent)
+                      );
+                    } finally {
+                      setStateDialog(() { isUpdating = false; });
+                    }
+                  },
+                  child: isUpdating 
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.tealAccent, strokeWidth: 2))
+                    : const Text('確認修改', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold))
                 ),
               ],
             ),
-            actions: [
-              TextButton(
-                onPressed: isUpdating ? null : () => Navigator.pop(context),
-                child: const Text('取消', style: TextStyle(color: Colors.grey))
-              ),
-              TextButton(
-                onPressed: isUpdating ? null : () async {
-                  final p1 = newPasswordController.text.trim();
-                  final p2 = confirmPasswordController.text.trim();
-
-                  if (p1.isEmpty || p2.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼欄位不可為空')));
-                    return;
-                  }
-                  if (p1 != p2) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('兩次輸入的密碼不一致')));
-                    return;
-                  }
-                  if (p1.length < 6) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼長度至少需要 6 個字元')));
-                    return;
-                  }
-
-                  setStateDialog(() { isUpdating = true; });
-
-                  try {
-                    await Supabase.instance.client.auth.updateUser(UserAttributes(password: p1));
-                    
-                    if (!context.mounted) return;
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('密碼修改成功！請使用新密碼重新登入。'), backgroundColor: Colors.teal)
-                    );
-                    
-                    // 🎯 應您的要求，這裡已經將「自動填入密碼」的程式碼移除了！
-                    // 使用者必須自行手動輸入剛剛設定好的新密碼來進行登入。
-                    
-                    // 為了安全起見，重設完密碼後先登出，確保乾淨的登入狀態
-                    await Supabase.instance.client.auth.signOut();
-                    
-                  } catch (e) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('密碼更新失敗，請稍後再試。'), backgroundColor: Colors.redAccent)
-                    );
-                  } finally {
-                    setStateDialog(() { isUpdating = false; });
-                  }
-                },
-                child: isUpdating 
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.tealAccent, strokeWidth: 2))
-                  : const Text('確認修改', style: TextStyle(color: Colors.tealAccent))
-              ),
-            ],
           );
         }
       ),
@@ -310,128 +401,195 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showErrorDialog(String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('登入失敗', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-        content: Text(message),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('確定', style: TextStyle(color: Colors.teal))),
-        ],
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.black.withValues(alpha: 0.6),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+          ),
+          title: const Text('登入失敗', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+          content: Text(message, style: const TextStyle(color: Colors.white70, height: 1.5)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context), 
+              child: const Text('確定', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold))
+            ),
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final double screenHeight = MediaQuery.of(context).size.height;
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              height: screenHeight * 0.25,
-              decoration: const BoxDecoration(color: Color(0xFF1E1E1E)),
-              child: Image.asset('assets/login_banner.png', fit: BoxFit.cover, alignment: Alignment.center),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset(
+              'assets/login_full_bg.png', 
+              fit: BoxFit.cover,
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 24.0),
-                    child: Text(
-                      'FTESS Home',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.normal,
-                        color: Colors.teal,
-                        letterSpacing: 1.2,
+          ),
+          
+          Positioned.fill(
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight, 
                       ),
-                    ),
-                  ),
-                  TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    style: const TextStyle(fontSize: 12),
-                    decoration: const InputDecoration(labelText: '電子郵件 (Email)', labelStyle: TextStyle(fontSize: 12), prefixIcon: Icon(Icons.email, size: 20), border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    style: const TextStyle(fontSize: 12),
-                    decoration: InputDecoration(
-                      labelText: '密碼', 
-                      labelStyle: const TextStyle(fontSize: 12), 
-                      prefixIcon: const Icon(Icons.lock, size: 20), 
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                          size: 20,
-                          color: Colors.grey,
+                      child: IntrinsicHeight(
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 200), 
+                            
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: BackdropFilter(
+                                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
+                                  child: Container(
+                                    padding: const EdgeInsets.all(24.0),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.6), 
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        const Padding(
+                                          padding: EdgeInsets.only(bottom: 24.0),
+                                          child: Text(
+                                            'FTESS Home',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 28,
+                                              fontWeight: FontWeight.normal,
+                                              color: Colors.teal,
+                                              letterSpacing: 1.2,
+                                            ),
+                                          ),
+                                        ),
+                                        TextField(
+                                          controller: _emailController,
+                                          keyboardType: TextInputType.emailAddress,
+                                          style: const TextStyle(fontSize: 13),
+                                          decoration: const InputDecoration(labelText: '電子郵件 (Email)', labelStyle: TextStyle(fontSize: 13), prefixIcon: Icon(Icons.email, size: 20), border: OutlineInputBorder()),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        TextField(
+                                          controller: _passwordController,
+                                          obscureText: _obscurePassword,
+                                          style: const TextStyle(fontSize: 13),
+                                          decoration: InputDecoration(
+                                            labelText: '密碼', 
+                                            labelStyle: const TextStyle(fontSize: 13), 
+                                            prefixIcon: const Icon(Icons.lock, size: 20), 
+                                            border: const OutlineInputBorder(),
+                                            suffixIcon: IconButton(
+                                              icon: Icon(
+                                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                                size: 20,
+                                                color: Colors.grey,
+                                              ),
+                                              onPressed: () {
+                                                setState(() {
+                                                  _obscurePassword = !_obscurePassword;
+                                                });
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Checkbox(value: rememberPassword, activeColor: Colors.teal, onChanged: (value) { setState(() { rememberPassword = value ?? false; }); }),
+                                                const Text('記住密碼', style: TextStyle(color: Colors.black87, fontSize: 12)),
+                                              ],
+                                            ),
+                                            Row(
+                                              children: [
+                                                Checkbox(
+                                                  value: autoLogin, activeColor: Colors.teal, 
+                                                  onChanged: (value) {
+                                                    setState(() {
+                                                      autoLogin = value ?? false;
+                                                      if (autoLogin) rememberPassword = true;
+                                                    });
+                                                  }
+                                                ),
+                                                const Text('自動登入', style: TextStyle(color: Colors.black87, fontSize: 12)),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        ElevatedButton(
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                                          onPressed: _isLoading ? null : _handleLogin,
+                                          child: _isLoading
+                                            ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
+                                            : const Text('登入', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            TextButton(onPressed: _handleForgotPassword, child: const Text('忘記密碼？', style: TextStyle(color: Colors.black54, fontSize: 12, decoration: TextDecoration.underline))),
+                                            OutlinedButton(
+                                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), side: const BorderSide(color: Colors.teal), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                                              onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())); },
+                                              child: const Text('註冊新帳號', style: TextStyle(fontSize: 12, color: Colors.teal, fontWeight: FontWeight.bold)),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            
+                            const Spacer(),
+                            
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 24.0),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: BackdropFilter(
+                                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.6),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: _buildConnectionStatusLight(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
-                        },
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Checkbox(value: rememberPassword, activeColor: Colors.teal, onChanged: (value) { setState(() { rememberPassword = value ?? false; }); }),
-                          const Text('記住密碼', style: TextStyle(color: Colors.black54, fontSize: 11)),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: autoLogin, activeColor: Colors.teal, 
-                            onChanged: (value) {
-                              setState(() {
-                                autoLogin = value ?? false;
-                                if (autoLogin) rememberPassword = true;
-                              });
-                            }
-                          ),
-                          const Text('自動登入', style: TextStyle(color: Colors.black54, fontSize: 11)),
-                        ],
-                      ),
-                    ],
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                    onPressed: _isLoading ? null : _handleLogin,
-                    child: _isLoading
-                      ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
-                      : const Text('登入', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      TextButton(onPressed: _handleForgotPassword, child: const Text('忘記密碼？', style: TextStyle(color: Colors.black45, fontSize: 11, decoration: TextDecoration.underline))),
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), side: const BorderSide(color: Colors.teal), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                        onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())); },
-                        child: const Text('註冊新帳號', style: TextStyle(fontSize: 11, color: Colors.teal, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
