@@ -14,10 +14,11 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.onLoginSuccess});
 
   @override
+  // 🎯 加入 WidgetsBindingObserver 控制 Timer
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool rememberPassword = false;
@@ -31,17 +32,30 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
     _loadSavedCredentials();
     _startHeartbeatCheck(); 
   }
 
+  // 🎯 加入生命週期判斷：背景暫停 Timer
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startHeartbeatCheck();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _heartbeatTimer?.cancel();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
     _heartbeatTimer?.cancel(); 
     super.dispose();
   }
 
   void _startHeartbeatCheck() {
+    _heartbeatTimer?.cancel(); // 🎯 安全防護，避免重複建立計時器
     _checkConnection(); 
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _checkConnection();
@@ -197,6 +211,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _sendOtpAndShowVerificationDialog(String email) async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
+    scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
     
     try {
       await Supabase.instance.client.auth.resetPasswordForEmail(email);
@@ -254,6 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: isVerifying ? null : () async {
                     final token = otpController.text.trim();
                     if (token.length != 8) { 
+                      scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
                       scaffoldMessenger.showSnackBar(const SnackBar(content: Text('請輸入完整的8位數驗證碼')));
                       return;
                     }
@@ -272,8 +288,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       _showUpdatePasswordDialog(); 
 
                     } on AuthException catch (e) {
+                      scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
                       scaffoldMessenger.showSnackBar(SnackBar(content: Text('驗證失敗：${e.message}'), backgroundColor: Colors.redAccent));
                     } catch (e) {
+                      scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
                       scaffoldMessenger.showSnackBar(const SnackBar(content: Text('發生未知錯誤'), backgroundColor: Colors.redAccent));
                     } finally {
                       setStateDialog(() { isVerifying = false; });
@@ -352,14 +370,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     final p2 = confirmPasswordController.text.trim();
 
                     if (p1.isEmpty || p2.isEmpty) {
+                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼欄位不可為空')));
                       return;
                     }
                     if (p1 != p2) {
+                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('兩次輸入的密碼不一致')));
                       return;
                     }
                     if (p1.length < 6) {
+                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼長度至少需要6個字元')));
                       return;
                     }
@@ -371,6 +392,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       
                       if (!context.mounted) return;
                       Navigator.pop(context);
+                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('密碼修改成功，請使用新密碼重新登入'), backgroundColor: Colors.teal)
                       );
@@ -379,6 +401,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       
                     } catch (e) {
                       if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('密碼更新失敗，請稍後再試'), backgroundColor: Colors.redAccent)
                       );
@@ -652,6 +675,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 

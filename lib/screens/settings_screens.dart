@@ -12,6 +12,15 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'dart:ui';
 
+// 🎯 新增：全域共用的網路異常訊息轉換器
+String _getFriendlyErrorMsg(dynamic e) {
+  final String errorMsg = e.toString();
+  if (errorMsg.contains('SocketException') || errorMsg.contains('Failed host lookup')) {
+    return '無法連線至雲端伺服器，請檢查您的 Wi-Fi 或網路連線狀態。';
+  }
+  return '錯誤細節: $errorMsg';
+}
+
 // ==========================================
 // 1. 設定主選單
 // ==========================================
@@ -123,12 +132,10 @@ class _SettingsSubMenuScreenState extends State<SettingsSubMenuScreen> {
     );
   }
 
-  // 🎯 替換：每個選項現在都是獨立的毛玻璃卡片，並加上立體陰影
   Widget _buildSubMenuTile(BuildContext context, IconData icon, String title, Widget? targetScreen) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
       child: Container(
-        // 🎯 新增：外層加上與告警頁面一致的陰影參數
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
@@ -156,6 +163,7 @@ class _SettingsSubMenuScreenState extends State<SettingsSubMenuScreen> {
                 trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black26),
                 onTap: () {
                   if (!_hasPermission) {
+                    ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                       content: Text('無此修改權限，僅設備擁有者可進入設定。'),
                       backgroundColor: Colors.redAccent,
@@ -272,6 +280,7 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
       }).eq('id', widget.deviceDbId);
 
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('設定完成'),
           backgroundColor: Colors.teal,
@@ -280,8 +289,10 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('儲存失敗，請檢查網路連線或 Supabase 權限。'),
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_getFriendlyErrorMsg(e)),
+          backgroundColor: Colors.redAccent,
         ));
       }
     } finally {
@@ -445,7 +456,11 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -466,12 +481,14 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
       await Supabase.instance.client.from('devices').update(updateData).eq('id', widget.deviceDbId);
 
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定完成'), backgroundColor: Colors.teal));
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('儲存失敗，請檢查網路連線。')));
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -625,6 +642,7 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
                         : (widget.isRootOrOwner 
                             ? _saveTariffToSupabase 
                             : () {
+                                ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                                   content: Text('權限不足，無法執行此功能'),
                                   backgroundColor: Colors.orange
@@ -723,6 +741,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
           _isStormBackupMode = true;
         });
 
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('已開啟「惡劣天氣備援模式」'),
@@ -732,11 +751,11 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('啟動失敗，請檢查網路連線。'),
-          ),
-        );
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_getFriendlyErrorMsg(e)),
+          backgroundColor: Colors.redAccent,
+        ));
       }
     }
   }
@@ -957,6 +976,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                                       : (widget.isRootOrOwner 
                                           ? _enableStormBackupMode 
                                           : () {
+                                              ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                                                 content: Text('權限不足，無法執行此功能'),
                                                 backgroundColor: Colors.orange
@@ -1148,6 +1168,7 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
 
   Future<void> _saveDeviceSpecsToSupabase() async {
     if (widget.deviceDbId.isEmpty || _selectedCity == null || _selectedDistrict == null) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請選擇完整的縣市與行政區')));
       return;
     }
@@ -1161,6 +1182,7 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
       }).eq('id', widget.deviceDbId);
 
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('設定完成'),
           backgroundColor: Colors.teal
@@ -1168,7 +1190,10 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
         Navigator.pop(context);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('儲存失敗，請檢查網路連線。')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+      }
     } finally {
       if (mounted) setState(() { _isSaving = false; });
     }
@@ -1309,6 +1334,7 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
                           : (widget.isRootOrOwner 
                               ? _saveDeviceSpecsToSupabase 
                               : () {
+                                  ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                                     content: Text('權限不足，無法執行此功能'),
                                     backgroundColor: Colors.orange
@@ -1345,6 +1371,7 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
   Future<void> _changeAdminRole(bool makeAdmin) async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請輸入欲設定的帳號信箱')));
       return;
     }
@@ -1379,12 +1406,17 @@ class _AdminPromotionScreenState extends State<AdminPromotionScreen> {
       if (response['success'] == true) {
         _emailController.clear();
         FocusScope.of(context).unfocus(); 
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
       } else {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統連線異常，請稍後再試'), backgroundColor: Colors.redAccent));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -1543,6 +1575,7 @@ class DeviceAdvancedSettingsScreen extends StatelessWidget {
                       ));
                     } else {
                       Navigator.pop(dialogContext); 
+                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('授權密碼錯誤，拒絕存取！'), backgroundColor: Colors.redAccent));
                     }
                   },
@@ -1563,81 +1596,85 @@ class DeviceAdvancedSettingsScreen extends StatelessWidget {
     showDialog(
       context: context,
       barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.3), 
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) {
-          return BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: AlertDialog(
-              backgroundColor: Colors.black.withValues(alpha: 0.6),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
-              ),
-              title: const Row(
-                children: [
-                  Icon(Icons.send_to_mobile_rounded, color: Colors.orangeAccent),
-                  SizedBox(width: 8),
-                  Text('設備移轉', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('請輸入接收者的註冊帳號(電子郵件)，系統將產生一組6位數接收碼。', style: TextStyle(fontSize: 13, color: Colors.white70, height: 1.5)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: '接收帳號(電子郵件)',
-                      labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
-                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
-                      prefixIcon: Icon(Icons.email_outlined, color: Colors.orangeAccent),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
-                  child: const Text('取消', style: TextStyle(color: Colors.grey)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  onPressed: isProcessing 
-                    ? null 
-                    : () async {
-                        final targetEmail = emailController.text.trim();
-                        if (targetEmail.isEmpty) return;
-                        setState(() => isProcessing = true);
-
-                        try {
-                          final response = await Supabase.instance.client.rpc(
-                            'initiate_device_transfer',
-                            params: {'p_device_id': deviceDbId, 'p_target_email': targetEmail},
-                          );
-
-                          if (!dialogContext.mounted) return;
-                          Navigator.pop(dialogContext);
-
-                          if (response['success'] == true) {
-                            _showVerificationCodeDialog(context, targetEmail, response['code']);
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
-                          }
-                        } catch (e) {
-                          if (dialogContext.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('連線異常，請稍後再試。'), backgroundColor: Colors.redAccent));
-                          }
-                        }
-                      },
-                  child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('產生接收碼', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
-                )
+          return AlertDialog(
+            backgroundColor: Colors.black87, 
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.send_to_mobile_rounded, color: Colors.orangeAccent),
+                SizedBox(width: 8),
+                Text('設備移轉', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
               ],
             ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('請輸入接收者的註冊帳號(電子郵件)，系統將產生一組6位數接收碼。', style: TextStyle(fontSize: 13, color: Colors.white70, height: 1.5)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: '接收者帳號(電子郵件)',
+                    labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
+                    prefixIcon: Icon(Icons.email_outlined, color: Colors.orangeAccent),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
+                child: const Text('取消', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                onPressed: isProcessing 
+                  ? null 
+                  : () async {
+                      final targetEmail = emailController.text.trim();
+                      if (targetEmail.isEmpty) return;
+                      setState(() => isProcessing = true);
+
+                      try {
+                        final response = await Supabase.instance.client.rpc(
+                          'initiate_device_transfer',
+                          params: {
+                            'p_device_id': int.tryParse(deviceDbId) ?? 0, 
+                            'p_target_email': targetEmail
+                          },
+                        );
+
+                        if (!dialogContext.mounted) return;
+                        Navigator.pop(dialogContext);
+
+                        if (response['success'] == true) {
+                          _showVerificationCodeDialog(context, targetEmail, response['code']);
+                        } else {
+                          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+                        }
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+                          setState(() => isProcessing = false); 
+                        }
+                      }
+                    },
+                child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('產生接收碼', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+              )
+            ],
           );
         }
       )
@@ -1691,87 +1728,89 @@ class DeviceAdvancedSettingsScreen extends StatelessWidget {
     showDialog(
       context: context,
       barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.3), 
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) {
-          return BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: AlertDialog(
-              backgroundColor: Colors.black.withValues(alpha: 0.6),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5),
-              ),
-              title: const Row(
-                children: [
-                  Icon(Icons.warning_rounded, color: Colors.redAccent),
-                  SizedBox(width: 8),
-                  Text('設備所有權強制移轉(root權限)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('警告：此操作將無條件立即轉移設備所有權，並清除所有分享紀錄。', style: TextStyle(fontSize: 12, color: Colors.white70, height: 1.5)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: '接收帳號(電子郵件)', 
-                      labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
-                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.redAccent))
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: isProcessing ? null : () => Navigator.pop(dialogContext), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  onPressed: isProcessing 
-                    ? null 
-                    : () async {
-                        final targetEmail = emailController.text.trim();
-                        if (targetEmail.isEmpty) return;
-                        setState(() => isProcessing = true);
-
-                        try {
-                          final response = await Supabase.instance.client.rpc(
-                            'force_transfer_device_ownership',
-                            params: {'p_device_id': deviceDbId, 'p_target_email': targetEmail},
-                          );
-                          if (!dialogContext.mounted) return;
-                          
-                          if (response['success'] == true) {
-                            Navigator.pop(dialogContext);
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
-                            Navigator.of(context).popUntil((route) => route.isFirst);
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
-                            setState(() => isProcessing = false);
-                          }
-                        } catch (e) {
-                          if (dialogContext.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('連線異常，請稍後再試。'), backgroundColor: Colors.redAccent));
-                            setState(() => isProcessing = false);
-                          }
-                        }
-                      },
-                  child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('強制移轉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                )
+          return AlertDialog(
+            backgroundColor: Colors.black87, 
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5),
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.warning_rounded, color: Colors.redAccent),
+                SizedBox(width: 8),
+                Text('設備所有權強制移轉(root權限)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.redAccent)),
               ],
             ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('警告：此操作將無條件立即轉移設備所有權，並清除所有分享紀錄。', style: TextStyle(fontSize: 12, color: Colors.white70, height: 1.5)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: '接收者帳號(電子郵件)', 
+                    labelStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.redAccent))
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: isProcessing ? null : () => Navigator.pop(dialogContext), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                onPressed: isProcessing 
+                  ? null 
+                  : () async {
+                      final targetEmail = emailController.text.trim();
+                      if (targetEmail.isEmpty) return;
+                      setState(() => isProcessing = true);
+
+                      try {
+                        final response = await Supabase.instance.client.rpc(
+                          'force_transfer_device_ownership',
+                          params: {
+                            'p_device_id': int.tryParse(deviceDbId) ?? 0, 
+                            'p_target_email': targetEmail
+                          },
+                        );
+                        if (!dialogContext.mounted) return;
+                        
+                        if (response['success'] == true) {
+                          Navigator.pop(dialogContext);
+                          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
+                          Navigator.of(context).popUntil((route) => route.isFirst);
+                        } else {
+                          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+                          setState(() => isProcessing = false);
+                        }
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+                          setState(() => isProcessing = false);
+                        }
+                      }
+                    },
+                child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('強制移轉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              )
+            ],
           );
         }
       )
     );
   }
 
-  // 🎯 替換：每個選項現在都是獨立的毛玻璃卡片
-  // 🎯 替換：每個選項現在都是獨立的毛玻璃卡片，並加上立體陰影
   Widget _buildGlassTile({
     required BuildContext context,
     required IconData icon,
@@ -1784,7 +1823,6 @@ class DeviceAdvancedSettingsScreen extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
       child: Container(
-        // 🎯 新增：外層加上與告警頁面一致的陰影參數
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
@@ -1850,6 +1888,7 @@ class DeviceAdvancedSettingsScreen extends StatelessWidget {
                     titleColor: Colors.black87,
                     onTap: () {
                       if (!isRootOrOwner) {
+                        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('權限不足，無法執行此功能'),
                           backgroundColor: Colors.orange,
@@ -1878,6 +1917,7 @@ class DeviceAdvancedSettingsScreen extends StatelessWidget {
                     titleColor: Colors.black87,
                     onTap: () {
                       if (!isRootOrOwner) {
+                        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('權限不足，無法執行此功能'),
                           backgroundColor: Colors.orange,
@@ -1955,6 +1995,7 @@ class SystemAdvancedSettingsScreen extends StatelessWidget {
 // ==========================================
 // 8. 電池參數設定
 // ==========================================
+// 🎯 加入 WidgetsBindingObserver (包含 MQTT 生命週期控制)
 class BatteryParameterSettingsScreen extends StatefulWidget {
   final String deviceDbId;
   final String inverterSn;
@@ -1964,7 +2005,7 @@ class BatteryParameterSettingsScreen extends StatefulWidget {
   State<BatteryParameterSettingsScreen> createState() => _BatteryParameterSettingsScreenState();
 }
 
-class _BatteryParameterSettingsScreenState extends State<BatteryParameterSettingsScreen> {
+class _BatteryParameterSettingsScreenState extends State<BatteryParameterSettingsScreen> with WidgetsBindingObserver {
   bool _isLoading = true; 
   MqttServerClient? _mqttClient;
   
@@ -1980,6 +2021,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
     _setupDirectMqtt();
 
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
@@ -1989,19 +2031,37 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         _isOnline = false;
         debugPrint('⚠️ 網路斷開，主動中斷 MQTT 殭屍連線');
         _mqttClient?.disconnect();
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('網路連線中斷，暫停讀取'), backgroundColor: Colors.orange));
-        
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('網路連線中斷，暫停讀取'), backgroundColor: Colors.orange));
+        }
       } else if (hasNetwork && !_isOnline) {
         _isOnline = true;
         debugPrint('🌐 網路恢復，嘗試重新連線 MQTT');
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('網路已恢復，重新連線中...'), backgroundColor: Colors.teal));
-        _setupDirectMqtt();
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('網路已恢復，重新連線中...'), backgroundColor: Colors.teal));
+          _setupDirectMqtt();
+        }
       }
     });
   }
 
+  // 🎯 加入生命週期判斷：背景暫停連線，前景恢復連線
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_isOnline) {
+        _setupDirectMqtt();
+      }
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _mqttClient?.disconnect();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
     _connectivitySubscription?.cancel(); 
     _mqttClient?.disconnect(); 
     super.dispose();
@@ -2031,11 +2091,13 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         _mqttClient!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
           final recMess = c![0].payload as MqttPublishMessage;
           final payloadString = String.fromCharCodes(recMess.payload.message);
-          
-          if (payloadString.contains('^D092')) {
-            final startIndex = payloadString.indexOf('^D092');
+      
+          final match = RegExp(r'\^D(092|102)').firstMatch(payloadString);
+          if (match != null) {
+           final header = match.group(0)!;
+            final startIndex = payloadString.indexOf(header);
             final cleanString = payloadString.substring(startIndex);
-            _parseBatsResponse(cleanString);
+            _parseBatsResponse(cleanString, header); 
           }
         });
       }
@@ -2061,7 +2123,10 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         body: {'sn': widget.inverterSn, 'commands': ['^P005BATS\r']}, 
       );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('讀取失敗，請確認設備連線'), backgroundColor: Colors.redAccent));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+      }
     } finally {
       Future.delayed(const Duration(seconds: 4), () {
         if (mounted && _isLoading) setState(() => _isLoading = false);
@@ -2069,30 +2134,35 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
     }
   }
 
-  void _parseBatsResponse(String cleanString) {
+  void _parseBatsResponse(String cleanString, String header) {
     try {
       List<String> parts = cleanString.split(',');
-      if (parts.length >= 22) {
-        int vvvv = int.parse(parts[16]);
-        int xxx = int.parse(parts[18]);
-        int yyy = int.parse(parts[19]);
-        int zzz = int.parse(parts[20]);
-        int aaa = int.parse(RegExp(r'^\d+').firstMatch(parts[21])?.group(0) ?? '0');
+      int vvvv, xxx, yyy, zzz, aaa;
 
-        setState(() {
-          _maxAcChargeCurrent = (vvvv ~/ 10).clamp(10, 100);
-          _offGridDischargeSoc = xxx.clamp(0, 80);
-          _offGridRecoverySoc = yyy.clamp(0, 80);
-          _onGridDischargeSoc = zzz.clamp(5, 95);
-          _onGridRecoverySoc = aaa.clamp(5, 100);
-          _isLoading = false; 
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已成功讀取參數'), backgroundColor: Colors.teal)
-          );
-        }
+      if ((header == '^D092' || header == '^D102') && parts.length >= 22) {
+        vvvv = int.parse(parts[16]);
+        xxx = int.parse(parts[18]);
+        yyy = int.parse(parts[19]);
+        zzz = int.parse(parts[20]);
+        aaa = int.parse(RegExp(r'^\d+').firstMatch(parts[21])?.group(0) ?? '0');
+      } else {
+        return; 
+      }
+
+      setState(() {
+        _maxAcChargeCurrent = (vvvv ~/ 10).clamp(10, 100);
+        _offGridDischargeSoc = xxx.clamp(0, 80);
+        _offGridRecoverySoc = yyy.clamp(10, 80);
+        _onGridDischargeSoc = zzz.clamp(5, 95);
+        _onGridRecoverySoc = aaa.clamp(10, 100);
+        _isLoading = false; 
+      });
+  
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已成功讀取參數'), backgroundColor: Colors.teal)
+        );
       }
     } catch (e) {
       debugPrint('解析失敗: $e');
@@ -2101,6 +2171,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
 
   Future<void> _sendAcChargeCurrent() async {
     if (_maxAcChargeCurrent == null) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請稍等...'), backgroundColor: Colors.orange));
       return;
     }
@@ -2112,9 +2183,15 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         'send-device-command',
         body: {'sn': widget.inverterSn, 'commands': ['^S011MUCHGC$currentStr\r']},
       );
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('充電電流設定已發送'), backgroundColor: Colors.teal));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('充電電流設定已發送'), backgroundColor: Colors.teal));
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定失敗'), backgroundColor: Colors.redAccent));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+      }
     } finally {
       setState(() => _isLoading = false);
     }
@@ -2122,6 +2199,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
 
   Future<void> _sendSocSettings() async {
     if (_offGridDischargeSoc == null || _offGridRecoverySoc == null || _onGridDischargeSoc == null || _onGridRecoverySoc == null) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先等待讀取或設定所有參數'), backgroundColor: Colors.orange));
       return;
     }
@@ -2138,9 +2216,15 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         'send-device-command',
         body: {'sn': widget.inverterSn, 'commands': [cmd]},
       );
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SOC設定已發送'), backgroundColor: Colors.teal));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SOC設定已發送'), backgroundColor: Colors.teal));
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定失敗'), backgroundColor: Colors.redAccent));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_getFriendlyErrorMsg(e)), backgroundColor: Colors.redAccent));
+      }
     } finally {
       setState(() => _isLoading = false);
     }
@@ -2293,7 +2377,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                       _buildControlRow(
                         title: '電池重新放電 SOC',
                         value: _offGridRecoverySoc,
-                        options: _generateList(0, 80, 5),
+                        options: _generateList(10, 80, 5),
                         unit: '%',
                         onChanged: (v) => setState(() => _offGridRecoverySoc = v!),
                       ),
@@ -2321,7 +2405,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                       _buildControlRow(
                         title: '電池重新放電 SOC',
                         value: _onGridRecoverySoc,
-                        options: _generateList(5, 100, 5),
+                        options: _generateList(10, 100, 5),
                         unit: '%',
                         onChanged: (v) => setState(() => _onGridRecoverySoc = v!),
                       ),

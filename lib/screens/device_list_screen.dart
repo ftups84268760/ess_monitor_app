@@ -101,6 +101,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
       _reloadDeviceList();
 
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(!currentValue ? '已開啟該設備的推播通知' : '已關閉推播通知'),
@@ -112,6 +113,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     } catch (e) {
       debugPrint('切換推播失敗: $e');
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('設定失敗: $e'), backgroundColor: Colors.redAccent)
         );
@@ -179,10 +181,12 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
       _reloadDeviceList();
 
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設備已成功移除'), backgroundColor: Colors.teal));
       }
     } catch (e) {
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('刪除設備失敗，請檢查雲端連線'), backgroundColor: Colors.redAccent));
       }
     }
@@ -475,8 +479,14 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                               const SizedBox(width: 8),
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(color: Colors.orangeAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
-                                                child: const Text('來自共享', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
+                                                decoration: BoxDecoration(
+                                                  color: (device['allow_notifications'] != null) ? Colors.orangeAccent.withValues(alpha: 0.15) : Colors.redAccent.withValues(alpha: 0.15), 
+                                                  borderRadius: BorderRadius.circular(6)
+                                                ),
+                                                child: Text(
+                                                    (device['allow_notifications'] != null) ? '來自共享' : '管理員檢視', 
+                                                    style: TextStyle(color: (device['allow_notifications'] != null) ? Colors.orange : Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)
+                                                ),
                                               )
                                             ]
                                           ],
@@ -502,7 +512,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                             children: [
                                               const Icon(Icons.person_pin_circle, size: 14, color: Colors.orange),
                                               const SizedBox(width: 4),
-                                              // 🎯 替換：運用 FittedBox 讓擁有者信箱過長時能完整呈現在同一行
                                               Expanded(
                                                 child: FittedBox(
                                                   fit: BoxFit.scaleDown,
@@ -567,7 +576,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                             )
                                           ],
                                         )
-                                      else
+                                      else if (device['allow_notifications'] != null)
                                         IconButton(
                                           icon: Icon(
                                             (device['allow_notifications'] == true) ? Icons.notifications_active : Icons.notifications_off_outlined,
@@ -577,7 +586,10 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                           constraints: const BoxConstraints(),
                                           padding: const EdgeInsets.all(4),
                                           onPressed: () => _toggleSharedPushNotification(deviceId, device['allow_notifications'] == true),
-                                        ),
+                                        )
+                                      else
+                                        const SizedBox(height: 38), 
+                                      
                                       const Padding(
                                         padding: EdgeInsets.only(top: 24.0, right: 8.0),
                                         child: Icon(Icons.arrow_forward_ios, color: Colors.black26, size: 16),
@@ -712,14 +724,19 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
       if (response['success'] == true) {
         _emailController.clear();
         FocusScope.of(context).unfocus(); 
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
         await _fetchSharedUsers(); 
       } else {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
       }
     } catch (e) {
       debugPrint('分享設備異常: $e');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統連線異常，請稍後再試'), backgroundColor: Colors.redAccent));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統連線異常，請稍後再試'), backgroundColor: Colors.redAccent));
+      }
     } finally {
       if (mounted) setState(() => _isAdding = false);
     }
@@ -752,7 +769,10 @@ class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
     setState(() => _isLoading = true);
     try {
       await Supabase.instance.client.from('device_shares').delete().eq('id', shareId);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已成功收回權限'), backgroundColor: Colors.teal));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已成功收回權限'), backgroundColor: Colors.teal));
+      }
       await _fetchSharedUsers();
     } catch (e) {
       debugPrint('刪除權限失敗: $e');
@@ -872,85 +892,86 @@ void showReceiveDeviceDialog(BuildContext context, VoidCallback onSuccessRefresh
   showDialog(
     context: context,
     barrierDismissible: false,
+    barrierColor: Colors.black.withValues(alpha: 0.3), 
     builder: (dialogContext) => StatefulBuilder(
       builder: (context, setState) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: AlertDialog(
-            backgroundColor: Colors.black.withValues(alpha: 0.6),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
-            ),
-            title: const Row(
-              children: [
-                Icon(Icons.get_app_rounded, color: Colors.tealAccent),
-                SizedBox(width: 8),
-                Text('接收設備', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('請輸入原設備擁有者提供給您的 6 位數接收碼。', style: TextStyle(fontSize: 13, color: Colors.white70)),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: codeController,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 8, color: Colors.tealAccent),
-                  decoration: const InputDecoration(
-                    counterText: "",
-                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
-                child: const Text('取消', style: TextStyle(color: Colors.grey)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                onPressed: isProcessing 
-                  ? null 
-                  : () async {
-                      final code = codeController.text.trim();
-                      if (code.length != 6) return;
-
-                      setState(() => isProcessing = true);
-
-                      try {
-                        final response = await Supabase.instance.client.rpc(
-                          'accept_device_transfer',
-                          params: {'p_code': code},
-                        );
-
-                        if (!dialogContext.mounted) return;
-
-                        if (response['success'] == true) {
-                          Navigator.pop(dialogContext); 
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
-                          onSuccessRefresh(); 
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
-                          setState(() => isProcessing = false);
-                        }
-                      } catch (e) {
-                        if (dialogContext.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('連線異常，請稍後再試。'), backgroundColor: Colors.redAccent));
-                          setState(() => isProcessing = false);
-                        }
-                      }
-                    },
-                child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.black87, strokeWidth: 2)) : const Text('確認接收', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
-              )
+        return AlertDialog(
+          backgroundColor: Colors.black87, 
+          elevation: 8,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.get_app_rounded, color: Colors.tealAccent),
+              SizedBox(width: 8),
+              Text('接收設備', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
             ],
           ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('請輸入原設備擁有者提供給您的 6 位數接收碼。', style: TextStyle(fontSize: 13, color: Colors.white70)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: codeController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 8, color: Colors.tealAccent),
+                decoration: const InputDecoration(
+                  counterText: "",
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
+              child: const Text('取消', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              onPressed: isProcessing 
+                ? null 
+                : () async {
+                    final code = codeController.text.trim();
+                    if (code.length != 6) return;
+
+                    setState(() => isProcessing = true);
+
+                    try {
+                      final response = await Supabase.instance.client.rpc(
+                        'accept_device_transfer',
+                        params: {'p_code': code},
+                      );
+
+                      if (!dialogContext.mounted) return;
+
+                      if (response['success'] == true) {
+                        Navigator.pop(dialogContext); 
+                        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
+                        onSuccessRefresh(); 
+                      } else {
+                        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
+                        setState(() => isProcessing = false);
+                      }
+                    } catch (e) {
+                      if (dialogContext.mounted) {
+                        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('錯誤細節: ${e.toString()}'), backgroundColor: Colors.redAccent));
+                        setState(() => isProcessing = false);
+                      }
+                    }
+                  },
+              child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.black87, strokeWidth: 2)) : const Text('確認接收', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+            )
+          ],
         );
       }
     )

@@ -102,7 +102,20 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         });
       }
     } catch (e) {
-      debugPrint('讀取 TOU 設定失敗: $e');
+      if (mounted) {
+        String errorMsg = e.toString();
+        if (errorMsg.contains('SocketException') || errorMsg.contains('Failed host lookup')) {
+          errorMsg = '無法連線至雲端伺服器，請檢查您的 Wi-Fi 或網路連線狀態。';
+        } else {
+          errorMsg = '讀取失敗: $errorMsg';
+        }
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(errorMsg), 
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
     } finally {
       if (mounted) {
         setState(() { _isLoading = false; });
@@ -231,6 +244,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
 
       if (response.status == 200) {
         if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('已成功設定時間電價排程(共 ${commandsToDeploy.length} 組設定)'),
@@ -243,15 +257,19 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         throw Exception('雲端派發給設備失敗');
       }
     } catch (e) {
-      debugPrint('設定同步錯誤: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('設定同步失敗，請檢查網路連線。'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        String errorMsg = e.toString();
+        if (errorMsg.contains('SocketException') || errorMsg.contains('Failed host lookup')) {
+          errorMsg = '無法連線至雲端伺服器，請檢查您的 Wi-Fi 或網路連線狀態。';
+        } else {
+          errorMsg = '設定同步失敗: $errorMsg';
+        }
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(errorMsg), 
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ));
       }
     } finally {
       if (mounted) setState(() { _isSending = false; });
@@ -277,7 +295,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
                 padding: EdgeInsets.only(left: 8, bottom: 8),
                 child: Text('季節模式', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
               ),
-              // 🎯 替換：移除邊線改為柔和陰影
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -347,6 +364,7 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
                     : (widget.isRootOrOwner 
                         ? _sendBatchCommands 
                         : () {
+                            ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                               content: Text('權限不足，無法執行此功能'),
                               backgroundColor: Colors.orange
@@ -380,7 +398,6 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
     );
   }
 
-  // 🎯 替換：改為立體無框卡片設計
   Widget _buildSlotCard(String title, TouPeriod period) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),

@@ -12,7 +12,8 @@ class RawDataScreen extends StatefulWidget {
   State<RawDataScreen> createState() => _RawDataScreenState();
 }
 
-class _RawDataScreenState extends State<RawDataScreen> {
+// 🎯 加入 WidgetsBindingObserver
+class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserver {
   bool _isLoading = true;
   Map<String, dynamic>? _telemetryData;
   Map<String, dynamic>? _invPsData;
@@ -25,6 +26,7 @@ class _RawDataScreenState extends State<RawDataScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
     _fetchLatestTelemetry();
     _startTimer();
 
@@ -47,8 +49,20 @@ class _RawDataScreenState extends State<RawDataScreen> {
     _liveTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLatestTelemetry(isSilent: true));
   }
 
+  // 🎯 加入生命週期判斷：背景暫停，前景恢復
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchLatestTelemetry();
+      _startTimer();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _liveTimer?.cancel();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
     _connectivitySubscription?.cancel();
     _liveTimer?.cancel();
     super.dispose();
@@ -431,6 +445,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     if (_earliestDataDate != null) {
       final earliestOnly = DateTime(_earliestDataDate!.year, _earliestDataDate!.month, _earliestDataDate!.day);
       if (prevDateOnly.isBefore(earliestOnly)) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('該日期無歷史資料'), duration: Duration(seconds: 2)),
         );
@@ -451,6 +466,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     final nextDateOnly = DateTime(nextDate.year, nextDate.month, nextDate.day);
 
     if (nextDateOnly.isAfter(today)) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('無法選擇未來的日期時間'), duration: Duration(seconds: 2)),
       );
@@ -723,6 +739,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
   }
 }
 
+// 🎯 加入 WidgetsBindingObserver
 class AlarmListScreen extends StatefulWidget {
   final String deviceDbId;
   const AlarmListScreen({super.key, required this.deviceDbId});
@@ -731,13 +748,13 @@ class AlarmListScreen extends StatefulWidget {
   State<AlarmListScreen> createState() => _AlarmListScreenState();
 }
 
-class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProviderStateMixin {
+class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _isLoading = true;
   List<Map<String, dynamic>> _alarmList = [];
-  List<Map<String, dynamic>> _faultList = []; // 🎯 新增：錯誤清單
+  List<Map<String, dynamic>> _faultList = []; 
   String _filterMode = '全部'; 
   
-  late TabController _tabController; // 🎯 新增：標籤控制器
+  late TabController _tabController; 
   Timer? _alarmTimer;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isOnline = true;
@@ -747,6 +764,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
     _fetchAlarmsFromSupabase();
     _startTimer();
 
@@ -768,15 +786,26 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     _alarmTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchAlarmsFromSupabase(isSilent: true));
   }
 
+  // 🎯 加入生命週期判斷
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchAlarmsFromSupabase();
+      _startTimer();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _alarmTimer?.cancel();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
     _connectivitySubscription?.cancel();
     _alarmTimer?.cancel();
     _tabController.dispose();
     super.dispose();
   }
 
-  // 🎯 共用的過濾邏輯
   List<Map<String, dynamic>> _getFilteredList(List<Map<String, dynamic>> sourceList) {
     if (_filterMode == '處理中') {
       return sourceList.where((alarm) => alarm['is_active'] == true).toList();
@@ -784,6 +813,17 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
       return sourceList.where((alarm) => alarm['is_active'] == false).toList();
     }
     return sourceList; 
+  }
+
+  String _formatDateTime(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    try {
+      DateTime dt = DateTime.parse(raw).toLocal();
+      return "${dt.year}/${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')} "
+             "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}";
+    } catch (e) {
+      return raw;
+    }
   }
 
   Future<void> _fetchAlarmsFromSupabase({bool isSilent = false}) async {
@@ -807,7 +847,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
 
       final List<dynamic> alarmLogs = await Supabase.instance.client
           .from('device_alarms')
-          .select('alarm_code, alarm_message, is_active, created_at_tw, resolved_at_tw, created_at')
+          .select('alarm_code, alarm_message, is_active, created_at, resolved_at')
           .eq('device_id', sn)
           .order('created_at', ascending: false) 
           .limit(100);
@@ -816,12 +856,10 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
       List<Map<String, dynamic>> parsedFaults = [];
 
       for (var log in alarmLogs) {
-        // 🎯 核心判斷：如果 alarm_code 都是數字，代表它是系統錯誤 (Faults 01-32)
         final bool isFault = RegExp(r'^[0-9]+$').hasMatch(log['alarm_code'] ?? '');
-        
         final item = {
-          'time': log['created_at_tw'] ?? '',
-          'resolved_time': log['resolved_at_tw'] ?? '',
+          'time': _formatDateTime(log['created_at']?.toString()),
+          'resolved_time': _formatDateTime(log['resolved_at']?.toString()),
           'status': log['alarm_message'] ?? '未知狀態',
           'is_active': log['is_active'] == true,
         };
@@ -841,7 +879,15 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint('取得告警清單失敗: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('讀取失敗: ${e.toString()}'), 
+          backgroundColor: Colors.redAccent
+        ));
+        setState(() => _isLoading = false);
+      }
     } finally {
       _isFetching = false;
     }
@@ -885,7 +931,6 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     );
   }
 
-  // 🎯 共用的列表渲染元件
   Widget _buildListView(List<Map<String, dynamic>> sourceList, String emptyMessage) {
     final filteredList = _getFilteredList(sourceList);
 

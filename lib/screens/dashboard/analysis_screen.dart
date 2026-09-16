@@ -12,7 +12,8 @@ class AnalysisScreen extends StatefulWidget {
   State<AnalysisScreen> createState() => _AnalysisScreenState();
 }
 
-class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProviderStateMixin {
+// 🎯 加入 WidgetsBindingObserver
+class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   DateTime selectedDate = DateTime.now();
   DateTime? _earliestDataDate; 
@@ -44,6 +45,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
+    
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && mounted) {
         setState(() { _touchPosition = null; });
@@ -51,13 +54,31 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     });
 
     _fetchRealtimeLatestAndHistoryData();
+    _startTimer();
+  }
+
+  // 🎯 抽取計時器函式
+  void _startTimer() {
+    _realtimeRefreshTimer?.cancel();
     _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _fetchRealtimeLatestAndHistoryData(isSilent: true);
     });
   }
 
+  // 🎯 加入生命週期判斷
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchRealtimeLatestAndHistoryData();
+      _startTimer();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _realtimeRefreshTimer?.cancel();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
     _realtimeRefreshTimer?.cancel();
     _tabController.dispose();
     super.dispose();
@@ -190,6 +211,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     if (_earliestDataDate != null) {
       final earliestOnly = DateTime(_earliestDataDate!.year, _earliestDataDate!.month, _earliestDataDate!.day);
       if (prevDateOnly.isBefore(earliestOnly)) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('該日期無歷史資料'), duration: Duration(seconds: 2)),
         );
@@ -207,6 +229,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     final nextDateOnly = DateTime(nextDate.year, nextDate.month, nextDate.day);
 
     if (nextDateOnly.isAfter(today)) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('無法選擇未來的日期時間'), duration: Duration(seconds: 2)),
       );
@@ -415,7 +438,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     String acOutVS = _realtimeLatestTest?['ac_out_v_s'] != null ? '${_realtimeLatestTest!['ac_out_v_s']} V' : '--';
     String acOutFreq = _realtimeLatestTest?['ac_out_freq'] != null ? '${_realtimeLatestTest!['ac_out_freq']} Hz' : '--';
     
-    // 🎯 讀取「輸出功率」來替換原本的負載百分比
     double? acOutW = _realtimeLatestInvPs?['ac_out_total_active_power'] != null 
         ? double.tryParse(_realtimeLatestInvPs!['ac_out_total_active_power'].toString()) 
         : null;
@@ -436,12 +458,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
               _buildWhiteMetricCard('L1輸出電壓', acOutVR),
               _buildWhiteMetricCard('L2輸出電壓', acOutVS),
               _buildWhiteMetricCard('輸出頻率', acOutFreq),
-              // 🎯 替換成輸出功率 (W/kW)
               _buildWhiteMetricCard('輸出功率', acOutWStr),
             ],
           ),
           const SizedBox(height: 16),
-          // 🎯 更新圖例名稱與新指定的顏色 (淺棕/極淺棕/藍)
           _buildInteractiveChartContainer('home', [
             MapEntry(const Color(0xFFC4A484), 'L1輸出電壓 (V)'),
             MapEntry(const Color(0xFFE5D3B3), 'L2輸出電壓 (V)'),
@@ -632,7 +652,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             ],
           ),
           const SizedBox(height: 16),
-          // 🎯 更新圖例名稱與新指定的顏色 (淺灰/極淺灰/紅)
           _buildInteractiveChartContainer('grid', [
             MapEntry(const Color(0xFF9E9E9E), 'L1輸入電壓 (V)'),
             MapEntry(const Color(0xFFE0E0E0), 'L2輸入電壓 (V)'),

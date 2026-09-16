@@ -20,7 +20,7 @@ const ALARM_DICTIONARY: Record<string, string> = {
   'E': 'Battery under (電池電壓過低)',
   'F': 'Battery low (電池電壓偏低)',
   'G': 'Battery open (電池未接)',
-  'H': 'Battery voltage too higher (電池電压過高)',
+  'H': 'Battery voltage too higher (電池電壓過高)',
   'I': 'Battery low in hybrid mode (混合模式電池電壓過低)',
   'J': 'Grid voltage high loss (市電輸入電壓過高)',
   'K': 'Grid voltage low loss (市電輸入電壓過低)',
@@ -146,17 +146,19 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================================
-    // 情境 A3：收到告警狀態 (^D054) ➔ Diff 比對演算法，寫入 device_alarms
+    // 情境 A3：收到告警狀態 (^D054 或 ^D050) ➔ Diff 比對演算法，寫入 device_alarms
     // ========================================================================
-    if (rawResponse.includes('^D054')) {
+    const wsMatch = rawResponse.match(/\^D(054|050)/);
+    if (wsMatch) {
+      const header = wsMatch[0];
       console.log(`[Webhook Recv] 🚨 收到告警狀態: ${rawResponse.trim()}`)
-      
-      // 清洗字串：擷取 ^D054 後面的部分，只保留數字與逗號
-      const cleanStr = rawResponse.substring(rawResponse.indexOf('^D054') + 5).replace(/[^0-9,]/g, '');
+  
+      // 清洗字串：擷取表頭後面的部分，只保留數字與逗號
+      const cleanStr = rawResponse.substring(rawResponse.indexOf(header) + 5).replace(/[^0-9,]/g, '');
       const parts = cleanStr.split(',');
 
-      if (parts.length >= 26) {
-        // 撈取資料庫中該設備「正在觸發中」的告警
+      // 🎯 修改：降低長度限制至 24，以兼容產品 B (^D050)
+      if (parts.length >= 24) {
         const { data: activeAlarms, error: fetchError } = await supabase
           .from('device_alarms')
           .select('id, alarm_code')
@@ -167,29 +169,25 @@ Deno.serve(async (req: Request) => {
         const activeAlarmCodes = (activeAlarms || []).map(a => a.alarm_code);
         const keys = Object.keys(ALARM_DICTIONARY); // A 到 Z
 
-        // 逐一比對 26 碼狀態
-        for (let i = 0; i < 26; i++) {
+        // 🎯 修改：取陣列長度與 26 的最小值，避免產品 B 取到 undefined
+       const checkLength = Math.min(parts.length, 26);
+    
+        // 逐一比對狀態
+        for (let i = 0; i < checkLength; i++) {
           const code = keys[i];
           const isTriggered = parts[i] === '1';
           const isCurrentlyActive = activeAlarmCodes.includes(code);
 
           if (isTriggered && !isCurrentlyActive) {
-            // [觸發]：新增告警紀錄
             await supabase.from('device_alarms').insert({
-              device_id: deviceId,
-              alarm_code: code,
-              alarm_message: ALARM_DICTIONARY[code],
-              is_active: true
+              device_id: deviceId, alarm_code: code, alarm_message: ALARM_DICTIONARY[code], is_active: true
             });
             console.log(`[新增告警] 設備 ${deviceId}: ${ALARM_DICTIONARY[code]}`);
           } 
           else if (!isTriggered && isCurrentlyActive) {
-            // [解除]：更新為已解除，寫入解除時間
             await supabase.from('device_alarms')
               .update({ is_active: false, resolved_at: new Date().toISOString() })
-              .eq('device_id', deviceId)
-              .eq('alarm_code', code)
-              .eq('is_active', true);
+              .eq('device_id', deviceId).eq('alarm_code', code).eq('is_active', true);
             console.log(`[解除告警] 設備 ${deviceId}: ${ALARM_DICTIONARY[code]}`);
           }
         }

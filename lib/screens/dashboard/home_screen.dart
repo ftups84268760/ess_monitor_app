@@ -159,6 +159,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     });
   }
 
+  // 🎯 加入生命週期判斷：背景暫停，前景恢復
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchRealLocationAndWeather();
+      _fetchTelemetryDataFromSupabase();
+      _startTimers(); // 重啟計時器
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _stopTimers();  // 暫停計時器
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -184,7 +196,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             .maybeSingle();
             
         if (data != null) {
-          // 🎯 修正：嚴格限制只有擁有者或 root 才能觸發首次設定精靈
           isRootOrOwner = (data['user_id'] == user.id) || 
                           widget.accountType == '系統管理員(root)';
         }
@@ -496,18 +507,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       await Supabase.instance.client.from('devices').update({'is_storm_backup_mode': false}).eq('id', widget.deviceDbId);
       if (mounted) {
         setState(() { _isStormBackupMode = false; });
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已關閉「惡劣天氣備援模式」'), backgroundColor: Colors.teal));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('關閉失敗，請檢查網路連線。'), backgroundColor: Colors.redAccent));
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _fetchRealLocationAndWeather();
-      _fetchTelemetryDataFromSupabase();
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('關閉失敗，請檢查網路連線。'), backgroundColor: Colors.redAccent));
+      }
     }
   }
 
@@ -979,7 +986,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                                       .eq('id', widget.deviceDbId)
                                       .single();
                                       
-                                  // 🎯 修正：嚴格限制只有擁有者或 root 才能進入裝置編輯畫面
                                   isRootOrOwner = (data['user_id'] == user.id) || 
                                                   widget.accountType == '系統管理員(root)';
                                 } catch (_) {}
@@ -1410,9 +1416,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 }
 
-// ==========================================
-// 🎯 核心：首次連線設定精靈 (FirstTimeSetupWizard)
-// ==========================================
+// 🎯 加入 WidgetsBindingObserver (首頁設定精靈也有計時器)
 class FirstTimeSetupWizard extends StatefulWidget {
   final String deviceDbId;
   final String inverterSn;
@@ -1429,7 +1433,7 @@ class FirstTimeSetupWizard extends StatefulWidget {
   State<FirstTimeSetupWizard> createState() => _FirstTimeSetupWizardState();
 }
 
-class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
+class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with WidgetsBindingObserver {
   int _step = 0; 
   Timer? _connCheckTimer;
 
@@ -1464,17 +1468,29 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
     _startConnectionCheck();
+  }
+
+  // 🎯 加入生命週期判斷
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_step == 0) _startConnectionCheck();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _connCheckTimer?.cancel();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
     _connCheckTimer?.cancel();
     super.dispose();
   }
 
   void _startConnectionCheck() {
-    // 每 3 秒檢查一次資料庫，看看這個 SN 有沒有近期 (5 分鐘內) 的遙測資料上傳
+    _connCheckTimer?.cancel();
     _connCheckTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       try {
         final res = await Supabase.instance.client
@@ -1503,6 +1519,7 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
 
   Future<void> _executeSetup() async {
     if (_selectedCity == null || _selectedDistrict == null) {
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請選擇完整的縣市與行政區')));
       return;
     }
@@ -1510,7 +1527,6 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
     setState(() { _step = 2; });
 
     try {
-      // 1. 寫入設備位置與預設排程 (JSON) 到資料庫
       final String fullAddress = "$_selectedCity$_selectedDistrict";
       await Supabase.instance.client.from('devices').update({
         'address': fullAddress,
@@ -1525,7 +1541,6 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
         }
       }).eq('id', widget.deviceDbId);
 
-      // 2. 透過 Edge Function 直接對硬體派發指令
       await Supabase.instance.client.functions.invoke(
         'send-device-command',
         body: {
@@ -1543,6 +1558,7 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
 
     } catch (e) {
       if (!mounted) return; 
+      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定發生錯誤，請稍後重試'), backgroundColor: Colors.redAccent));
       setState(() { _step = 1; }); 
     }

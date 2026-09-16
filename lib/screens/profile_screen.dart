@@ -7,6 +7,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'settings_screens.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+// 🎯 全域共用的網路異常訊息轉換器
+String _getFriendlyErrorMsg(dynamic e) {
+  final String errorMsg = e.toString();
+  if (errorMsg.contains('SocketException') || errorMsg.contains('Failed host lookup')) {
+    return '無法連線至雲端伺服器，請檢查您的 Wi-Fi 或網路連線狀態。';
+  }
+  return '錯誤細節: $errorMsg';
+}
+
 class ProfileScreen extends StatefulWidget {
   final String nickname;
   final String accountType;
@@ -54,13 +63,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await Supabase.instance.client.from('profiles').update({'avatar_url': publicUrl}).eq('id', user.id);
 
       widget.onProfileDataChanged();
+      
+      // 🎯 Linter 規範修正：統一使用 mounted 攔截，後續操作 context 就不會報錯
+      if (!mounted) return;
       setState(() { _isActionLoading = false; });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('頭像上傳成功！'), backgroundColor: Colors.teal));
-      }
+      ScaffoldMessenger.of(context).clearSnackBars(); 
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('頭像上傳成功！'), backgroundColor: Colors.teal));
     } catch (e) {
+      if (!mounted) return;
       setState(() { _isActionLoading = false; });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('頭像上傳異常')));
+      ScaffoldMessenger.of(context).clearSnackBars(); 
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('頭像上傳異常: ${_getFriendlyErrorMsg(e)}'), backgroundColor: Colors.redAccent));
     }
   }
 
@@ -91,7 +104,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nicknameEditController.text = widget.nickname;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: Colors.white,
         title: const Text('修改個人暱稱', style: TextStyle(color: Colors.black87, fontSize: 15)),
         content: TextField(
@@ -102,21 +115,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消', style: TextStyle(color: Colors.grey))),
           TextButton(
             onPressed: () async {
               final newName = _nicknameEditController.text.trim();
               if (newName.isEmpty) return;
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
 
               setState(() { _isActionLoading = true; });
               try {
                 final uid = Supabase.instance.client.auth.currentUser?.id;
                 await Supabase.instance.client.from('profiles').update({'nickname': newName}).eq('id', uid!);
                 widget.onProfileDataChanged();
+                
+                if (!mounted) return;
                 setState(() { _isActionLoading = false; });
               } catch (e) {
+                if (!mounted) return;
                 setState(() { _isActionLoading = false; });
+                ScaffoldMessenger.of(context).clearSnackBars(); 
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('修改失敗: ${_getFriendlyErrorMsg(e)}'), backgroundColor: Colors.redAccent));
               }
             },
             child: const Text('儲存', style: TextStyle(color: Colors.teal))
@@ -137,7 +155,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setStateDialog) {
+        builder: (contextBuilder, setStateDialog) {
           return BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
             child: AlertDialog(
@@ -212,22 +230,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     
                     if (p1.isEmpty || p2.isEmpty) return;
                     if (p1 != p2) {
+                      ScaffoldMessenger.of(context).clearSnackBars();
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('兩次密碼不一致')));
                       return;
                     }
                     if (p1.length < 6) {
+                      ScaffoldMessenger.of(context).clearSnackBars();
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼長度至少需要6個字元')));
                       return;
                     }
 
                     try {
                       await Supabase.instance.client.auth.updateUser(UserAttributes(password: p1));
-                      if (!context.mounted) return;
+                      
+                      // 🎯 針對獨立的 Dialog Context 檢查
+                      if (!dialogContext.mounted) return;
                       Navigator.pop(dialogContext);
+                      
+                      // 🎯 針對主畫面的 State 檢查
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).clearSnackBars();
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼更新成功！', style: TextStyle(color: Colors.white)), backgroundColor: Colors.teal));
                     } catch (e) {
                       debugPrint('密碼更新失敗: $e'); 
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼更新失敗，請檢查網路連線', style: TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('密碼更新失敗: ${_getFriendlyErrorMsg(e)}', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
                     }
                   },
                   child: const Text('確認修改', style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold)),
@@ -392,6 +420,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   )
                                 );
                               } else {
+                                ScaffoldMessenger.of(context).clearSnackBars(); 
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                     content: Text('請先新增首台設備(或 接收分享設備)，即可開啟推播設定。'),
@@ -402,8 +431,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             } catch (e) {
                               debugPrint('無法取得設備ID以進入推播設定: $e');
                               if (context.mounted) {
+                                ScaffoldMessenger.of(context).clearSnackBars(); 
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('系統連線異常，請稍後再試。'), backgroundColor: Colors.redAccent)
+                                  SnackBar(content: Text('系統連線異常: ${_getFriendlyErrorMsg(e)}'), backgroundColor: Colors.redAccent)
                                 );
                               }
                             }
@@ -441,15 +471,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 
                 const SizedBox(height: 32),
                 
-                // 🎯 修改：改為純紅色實心、白字、帶輕微陰影的按鈕，與天氣備援按鈕風格一致
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: Colors.red.shade600, // 實心深紅
-                      foregroundColor: Colors.white,        // 文字純白
-                      elevation: 2,                         // 懸浮陰影
+                      backgroundColor: Colors.red.shade600, 
+                      foregroundColor: Colors.white,        
+                      elevation: 2,                         
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () {
@@ -515,23 +544,25 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           .from('devices')
           .select('id')
           .eq('user_id', user.id);
+      
+      if (!mounted) return;
       setState(() {
         _deviceCount = (response as List).length;
         _canDelete = _deviceCount == 0;
         _isCheckingConditions = false;
       });
     } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars(); 
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('驗證失敗: ${_getFriendlyErrorMsg(e)}'), backgroundColor: Colors.redAccent));
       setState(() { _isCheckingConditions = false; });
     }
   }
 
   Future<void> _executeAccountDeletion() async {
-    final navigator = Navigator.of(context);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
     showDialog(
       context: context,
-      builder: (context) => BackdropFilter(
+      builder: (dialogContext) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: AlertDialog(
           backgroundColor: Colors.black.withValues(alpha: 0.6),
@@ -543,10 +574,11 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           title: const Text('註銷確認', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
           content: const Text('您確定要完全註銷此帳號嗎？此操作將會清除所有雲端數據，且永遠無法被恢復。', style: TextStyle(color: Colors.white70, height: 1.5)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消', style: TextStyle(color: Colors.grey))),
             TextButton(
               onPressed: () async {
-                navigator.pop();
+                Navigator.pop(dialogContext); // 先關閉對話框
+                
                 try {
                   final user = Supabase.instance.client.auth.currentUser;
                   if (user != null) {
@@ -555,14 +587,17 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
 
                   await Supabase.instance.client.rpc('delete_user_own_account');
                   await widget.onLogout();
-                  navigator.pop();
 
-                  scaffoldMessenger.showSnackBar(
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).clearSnackBars(); 
+                  ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('您的帳號已成功銷毀註銷，感謝您的使用。'), backgroundColor: Colors.teal)
                   );
                 } catch (e) {
-                  scaffoldMessenger.showSnackBar(
-                    const SnackBar(content: Text('註銷執行失敗，請確認雲端連線狀態。'), backgroundColor: Colors.redAccent)
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).clearSnackBars(); 
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('註銷執行失敗: ${_getFriendlyErrorMsg(e)}'), backgroundColor: Colors.redAccent)
                   );
                 }
               },
@@ -666,6 +701,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                         elevation: 0,
                       ),
                       onPressed: _canDelete ? _executeAccountDeletion : () {
+                        ScaffoldMessenger.of(context).clearSnackBars(); 
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('您的帳號目前仍綁定設備，請先退回設備清單刪除所有設備後再進行註銷。'))
                         );
