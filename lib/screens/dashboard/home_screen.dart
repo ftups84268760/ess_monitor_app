@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:weather_animation/weather_animation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:home_widget/home_widget.dart';
 import '../../core/constants.dart';
 import '../../widgets/chart_painters.dart';
 import '../settings_screens.dart';
@@ -159,15 +160,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     });
   }
 
-  // 🎯 加入生命週期判斷：背景暫停，前景恢復
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _fetchRealLocationAndWeather();
       _fetchTelemetryDataFromSupabase();
-      _startTimers(); // 重啟計時器
+      _startTimers(); 
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      _stopTimers();  // 暫停計時器
+      _stopTimers();  
     }
   }
 
@@ -184,6 +184,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   Future<void> _checkAndShowFirstTimeSetup() async {
     if (_hasCheckedFirstTimeSetup || widget.deviceDbId.isEmpty) return;
+    
+    _hasCheckedFirstTimeSetup = true; 
     
     bool isRootOrOwner = false;
     final user = Supabase.instance.client.auth.currentUser;
@@ -203,8 +205,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
 
     if (!isRootOrOwner) return; 
-
-    _hasCheckedFirstTimeSetup = true; 
 
     if (mounted) {
       showDialog(
@@ -418,6 +418,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     dcAcPowerDir = int.tryParse((data['dc_ac_power_direction'] ?? 0).toString()) ?? 0;
     linePowerDir = int.tryParse((data['line_power_direction'] ?? 0).toString()) ?? 0;
     if (data['created_at'] != null) _lastUpdateTime = _formatTimestamp(data['created_at'].toString());
+    
+    if (batterySoc != null) {
+      _updateDesktopWidget();
+    }
+  }
+
+  // 🎯 核心更新功能：同步推播資料給 iOS 與 Android 的 Widget
+  // 🎯 修改原本的方法，不傳參數，直接使用 Class 內的變數
+  Future<void> _updateDesktopWidget() async {
+    if (batterySoc == null) return;
+    try {
+      await HomeWidget.setAppGroupId('group.com.flighttechnic.ftess');
+      
+      await HomeWidget.saveWidgetData<int>('battery_soc', batterySoc!);
+      await HomeWidget.saveWidgetData<String>('device_name', widget.customInverterName);
+      
+      // 🎯 新增：判斷是否充電中並存入 AppGroup
+      bool isCharging = batteryPowerDir == 1;
+      await HomeWidget.saveWidgetData<bool>('is_charging', isCharging);
+      
+      await HomeWidget.updateWidget(
+        iOSName: 'EssBatteryWidget', 
+        androidName: 'EssBatteryWidgetProvider'
+      );
+    } catch (e) {
+      debugPrint('更新 Widget 失敗: $e');
+    }
   }
 
   Future<void> _fetchTelemetryDataFromSupabase() async {
@@ -464,6 +491,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             dcAcPowerDir = int.tryParse((testData['dc_ac_power_direction'] ?? 0).toString()) ?? 0;
             linePowerDir = int.tryParse((testData['line_power_direction'] ?? 0).toString()) ?? 0;
             if (invPsRes.isEmpty && testData['created_at'] != null) _lastUpdateTime = _formatTimestamp(testData['created_at'].toString());
+            
+            if (batterySoc != null) {
+              _updateDesktopWidget();
+            }
           } else { batterySoc = null; }
         });
       }
@@ -507,12 +538,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       await Supabase.instance.client.from('devices').update({'is_storm_backup_mode': false}).eq('id', widget.deviceDbId);
       if (mounted) {
         setState(() { _isStormBackupMode = false; });
-        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已關閉「惡劣天氣備援模式」'), backgroundColor: Colors.teal));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('關閉失敗，請檢查網路連線。'), backgroundColor: Colors.redAccent));
       }
     }
@@ -1416,7 +1447,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 }
 
-// 🎯 加入 WidgetsBindingObserver (首頁設定精靈也有計時器)
 class FirstTimeSetupWizard extends StatefulWidget {
   final String deviceDbId;
   final String inverterSn;
@@ -1433,9 +1463,8 @@ class FirstTimeSetupWizard extends StatefulWidget {
   State<FirstTimeSetupWizard> createState() => _FirstTimeSetupWizardState();
 }
 
-class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with WidgetsBindingObserver {
+class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> {
   int _step = 0; 
-  Timer? _connCheckTimer;
 
   final Map<String, List<String>> _taiwanLocations = {
     '基隆市': ['仁愛區', '信義區', '中正區', '中山區', '安樂區', '暖暖區', '七堵區'],
@@ -1465,66 +1494,14 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with Widget
   String? _selectedCity;
   String? _selectedDistrict;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
-    _startConnectionCheck();
-  }
-
-  // 🎯 加入生命週期判斷
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      if (_step == 0) _startConnectionCheck();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      _connCheckTimer?.cancel();
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
-    _connCheckTimer?.cancel();
-    super.dispose();
-  }
-
-  void _startConnectionCheck() {
-    _connCheckTimer?.cancel();
-    _connCheckTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
-      try {
-        final res = await Supabase.instance.client
-            .from('telemetry_test')
-            .select('created_at')
-            .eq('device_id', widget.inverterSn)
-            .order('created_at', ascending: false)
-            .limit(1);
-
-        if (res.isNotEmpty) {
-          final lastTime = DateTime.parse(res.first['created_at']).toLocal();
-          if (DateTime.now().difference(lastTime).inMinutes <= 5) {
-            _connCheckTimer?.cancel();
-            if (mounted) {
-              setState(() {
-                _step = 1; 
-              });
-            }
-          }
-        }
-      } catch (e) {
-        // 忽略錯誤繼續檢查
-      }
-    });
-  }
-
   Future<void> _executeSetup() async {
     if (_selectedCity == null || _selectedDistrict == null) {
-      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+      ScaffoldMessenger.of(context).clearSnackBars(); 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請選擇完整的縣市與行政區')));
       return;
     }
 
-    setState(() { _step = 2; });
+    setState(() { _step = 1; }); 
 
     try {
       final String fullAddress = "$_selectedCity$_selectedDistrict";
@@ -1541,26 +1518,37 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with Widget
         }
       }).eq('id', widget.deviceDbId);
 
-      await Supabase.instance.client.functions.invoke(
-        'send-device-command',
-        body: {
-          'sn': widget.inverterSn,
-          'commands': [
-            '^S011DST0,06,09\r',
-            '^S019TOU0,0,1,0000,0000\r',
-            '^S019TOU0,1,1,0000,0000\r'
-          ],
-        },
-      );
+      try {
+        await Supabase.instance.client.functions.invoke(
+          'send-device-command',
+          body: {
+            'sn': widget.inverterSn,
+            'commands': [
+              '^S011DST0,06,09\r',
+              '^S019TOU0,0,1,0000,0000\r',
+              '^S019TOU0,1,1,0000,0000\r'
+            ],
+          },
+        );
+      } catch (cmdError) {
+        debugPrint('設備離線，指令下發失敗: $cmdError');
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('已儲存安裝區域！充電排程將於設備上線後同步。'), 
+            backgroundColor: Colors.orange
+          ));
+        }
+      }
 
       if (!mounted) return; 
-      setState(() { _step = 3; });
+      setState(() { _step = 2; }); 
 
     } catch (e) {
       if (!mounted) return; 
-      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定發生錯誤，請稍後重試'), backgroundColor: Colors.redAccent));
-      setState(() { _step = 1; }); 
+      ScaffoldMessenger.of(context).clearSnackBars(); 
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('資料庫儲存失敗，請檢查手機網路連線'), backgroundColor: Colors.redAccent));
+      setState(() { _step = 0; }); 
     }
   }
 
@@ -1590,36 +1578,9 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with Widget
       case 0:
         return Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 20),
-            const CircularProgressIndicator(color: Colors.teal),
-            const SizedBox(height: 24),
-            const Text('正在等待設備連線...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 8),
-            const Text(
-              '請完成DTU設定，設定完成後此畫面會自動繼續',
-              style: TextStyle(fontSize: 12, color: Colors.black54, height: 1.5),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        );
-      case 1:
-        return Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.teal.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-              child: const Row(
-                children: [
-                  Icon(Icons.check_circle_outline, color: Colors.teal, size: 20),
-                  SizedBox(width: 8),
-                  Text('設備已成功連線', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 13)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
             const Text('請設定安裝區域：', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
@@ -1648,7 +1609,7 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with Widget
             const Text('安裝區域設定完成後，接著將設定初始充電排程', style: TextStyle(fontSize: 11, color: Colors.black45)),
           ],
         );
-      case 2:
+      case 1:
         return const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1659,7 +1620,7 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with Widget
             SizedBox(height: 20),
           ],
         );
-      case 3:
+      case 2:
       default:
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -1679,17 +1640,14 @@ class _FirstTimeSetupWizardState extends State<FirstTimeSetupWizard> with Widget
         TextButton(
           onPressed: () => Navigator.pop(context), 
           child: const Text('稍後設定', style: TextStyle(color: Colors.grey)),
-        )
-      ];
-    } else if (_step == 1) {
-      return [
+        ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
           onPressed: _executeSetup,
           child: const Text('下一步：設定排程', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         )
       ];
-    } else if (_step == 3) {
+    } else if (_step == 2) {
       return [
         SizedBox(
           width: double.infinity,

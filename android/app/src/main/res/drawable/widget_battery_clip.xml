@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 🎯 這就是 Android 版的遮罩：從底部 (bottom) 開始，垂直 (vertical) 顯示裡面的圖形 -->
+<clip xmlns:android="http://schemas.android.com/apk/res/android"
+    android:clipOrientation="vertical"
+    android:gravity="bottom"
+    android:drawable="@drawable/ic_device_mask" />

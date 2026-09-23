@@ -4,19 +4,6 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-    <string>需要使用相機來掃描設備上的 QR Code 與條碼。</string>
-	<key>CFBundleURLTypes</key>
-    <array>
-      <dict>
-        <key>CFBundleTypeRole</key>
-        <string>Editor</string>
-        <key>CFBundleURLSchemes</key>
-        <array>
-          <string>io.supabase.flutter</string>
-        </array>
-      </dict>
-    </array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -35,10 +22,27 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>io.supabase.flutter</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>本應用程式引用的第三方通訊套件底層包含藍牙檢測介面，但本系統目前並未使用藍牙功能進行設備連線。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>本應用程式引用的第三方通訊套件底層包含藍牙檢測介面，但本系統目前並未使用藍牙功能進行設備連線。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>需要存取您的相機以拍攝儲能主機設備照片</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -90,11 +94,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-    <false/>
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>本應用程式引用的第三方通訊套件底層包含藍牙檢測介面，但本系統目前並未使用藍牙功能進行設備連線。</string>
-    <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>本應用程式引用的第三方通訊套件底層包含藍牙檢測介面，但本系統目前並未使用藍牙功能進行設備連線。</string> 
 </dict>
 </plist>

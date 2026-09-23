@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 背景灰色軌道 -->
+    <item android:id="@android:id/background">
+        <shape>
+            <corners android:radius="4dp" />
+            <solid android:color="#D1D1D6" />
+        </shape>
+    </item>
+
+    <!-- 漸層進度條 (使用 clip 讓它能隨進度裁切) -->
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape>
+                <corners android:radius="4dp" />
+                <gradient
+                    android:startColor="#00D2FF"
+                    android:endColor="#38EF7D"
+                    android:angle="0" /> <!-- angle="0" 代表由左至右漸層 -->
+            </shape>
+        </clip>
+    </item>
+</layer-list>

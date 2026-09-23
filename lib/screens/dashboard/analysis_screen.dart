@@ -426,8 +426,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             MapEntry(const Color(0xFFF59E0B), '太陽能 (W)'),
             MapEntry(const Color(0xFFFF5252), '電網 (W)'),
             MapEntry(const Color(0xFF10B981), '電池 (W)'),
-          ], maxY: 12.0),
-          const SizedBox(height: 24),
+            MapEntry(const Color(0xFFFBBF24), '內部溫度 (°C)'), // 🎯 新增淡黃色圖例
+          ]), 
+          const SizedBox(height: 24), 
         ],
       ),
     );
@@ -730,11 +731,15 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             ),
           ),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          // 🎯 替換為 Wrap：支援自動換行，解決圖例在小螢幕被裁切的問題
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6.0,     // 圖例之間的水平間距
+            runSpacing: 10.0, // 換行後的垂直間距
             children: legends.map((item) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10.0),
+              padding: const EdgeInsets.symmetric(horizontal: 6.0),
               child: Row(
+                mainAxisSize: MainAxisSize.min, // 確保 Row 只佔用需要的寬度
                 children: [
                   Container(width: 8, height: 8, decoration: BoxDecoration(color: item.key, shape: BoxShape.circle)),
                   const SizedBox(width: 6),

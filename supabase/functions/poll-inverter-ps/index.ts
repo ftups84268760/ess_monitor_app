@@ -41,7 +41,7 @@ const ALARM_DICTIONARY: Record<string, string> = {
   'Z': 'FAN Lock Warning (風扇堵轉警告)'
 };
 
-// 💥 系統錯誤大腦：01-80 字典對照表 (依據 ^P004CFS 協議)
+// 💥 系統錯誤大腦：合併產品A與產品B的 01-89 字典對照表
 const FAULT_DICTIONARY: Record<string, string> = {
   '01': 'BUS exceed the upper limit (BUS電壓過高)',
   '02': 'BUS drop to the lower limit (BUS電壓過低)',
@@ -52,23 +52,51 @@ const FAULT_DICTIONARY: Record<string, string> = {
   '07': 'Inverter relay work abnormal (逆變器繼電器異常)',
   '08': 'Current sample abnormal when inverter doesn\'t work (非工作時電流採樣異常)',
   '09': 'Solar input voltage exceed upper limit (太陽能輸入電壓過高)',
-  '10': 'Solar power voltage abnormal (太陽能電壓異常)',
-  '19': 'Main Board CT Fault (主機板CT故障)',
+  '10': 'SPS / Solar power voltage abnormal (輔助電源或太陽能電壓異常)',
+  '11': 'Solar input current exceed upper limit (Solar輸入電流過大)',
+  '12': 'Leakage current exceed normal range (漏電流超過正常範圍)',
+  '13': 'Solar insulation resistance too low (Solar對地絕緣阻抗過低)',
+  '14': 'Inverter DC current exceed permit range (併網時逆變直流分量超限)',
+  '15': 'AC input diff between master and slave CPU (主從CPU對AC輸入偵測差異過大)',
+  '16': 'Leakage current detect circuit abnormal (非工作時漏電流偵測電路異常)',
+  '17': 'Communication loss between master and slave CPU (主從CPU通訊遺失)',
+  '18': 'Communicate data un-match between master and slave CPU (主從CPU通訊資料不匹配)',
+  '19': 'Main Board CT Fault / AC input ground wire loss (主機板CT故障 / 市電地線未接)', 
   '21': 'Grid Board CT Fault (電網板CT故障)',
-  '22': 'Battery voltage upper limit (電池電壓過高)',
+  '22': 'Battery voltage exceed upper limit (電池電壓過高)',
   '23': 'Over load (負載過載)',
+  '24': 'S phase Inverter current exceed the upper limit (S相逆變過流)',
+  '25': 'T phase Inverter current exceed the upper limit (T相逆變過流)',
+  '26': 'AC output short (輸出短路)',
   '27': 'Fan lock (風扇堵轉)',
-  '32': 'Battery DC-DC over current (電池DC-DC過電流)',
+  '29': 'Inverter Current sample abnormal when inverter doesn\'t work (非工作時逆變電流採樣異常)',
+  '30': 'S phase Inverter DC current exceed permit range (併網時S相逆變直流分量超過允許範圍)',
+  '31': 'T phase Inverter DC current exceed permit range (併網時T相逆變直流分量超過允許範圍)',
+  '32': 'Battery DC-DC current over (電池DC-DC過電流)',
   '33': 'AC output voltage too low (AC輸出電壓過低)',
   '34': 'AC output voltage too high (AC輸出電壓過高)',
-  '50': 'Negative power detected (偵測到逆向功率)',
+  '35': 'Control board wiring error (控制板接線錯誤)',
+  '36': 'AC circuit voltage sample error (AC電路電壓採樣異常)',
+  '37': 'AC N wire current over (市電N線過流)',
+  '39': 'S phase AC output voltage too low (S相輸出電壓過低)',
+  '40': 'T phase AC output voltage too low (T相輸出電壓過低)',
+  '41': 'S phase AC output voltage too high (S相輸出電壓過高)',
+  '42': 'T phase AC output voltage too high (T相輸出電壓過高)',
+  '50': 'Negative power detected / Relay version error (偵測到逆向功率 / 繼電器版本錯誤)',
+  '60': 'Negative power detected (偵測到反向功率)',
+  '61': 'Driver signal lost from relay board (Relay board驅動訊號遺失)',
   '62': 'Communication lost between main-board and relay-board (主機與繼電器板通訊遺失)',
+  '63': 'Versions are different between main board and relay board (主板與relay board版本不相容)',
   '71': 'Parallel version is incompatible (並聯版本不相容)',
+  '72': 'CT current detection abnormal (電流偵測異常)',
   '73': 'CAN fault (CAN通訊錯誤)',
   '74': 'HOST lost (主機通訊遺失)',
   '75': 'SYN lost (同步失敗)',
   '79': 'BUS Unbalanced (BUS電壓不平衡)',
-  '80': 'BUS Balances circuit hardware is faulty (BUS平衡電路硬體故障)'
+  '80': 'BUS Balances circuit fault / CAN lost (BUS平衡硬體故障 / CAN丟失)',
+  '81': 'HOST lost (主機遺失)',
+  '82': 'SYN lost (同步遺失)',
+  '89': 'BUS Balances overcurrent (BUS平衡過流)'
 };
 
 Deno.serve(async (req: Request) => {
@@ -196,74 +224,83 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ success: true, message: 'Alarms processed' }), { headers: { "Content-Type": "application/json" } })
     }
 
-    // ========================================================================
-    // 情境 A4：收到系統錯誤狀態 (^D008) ➔ 寫入 device_alarms
-    // ========================================================================
-    if (rawResponse.includes('^D008')) {
-      console.log(`[Webhook Recv] 💥 收到系統錯誤狀態: ${rawResponse.trim()}`)
+   // ========================================================================
+   // 情境 A4：收到系統錯誤狀態 (^D008) ➔ 寫入 device_alarms
+   // ========================================================================
+   if (rawResponse.includes('^D008')) {
+     console.log(`[Webhook Recv] 💥 收到系統錯誤狀態: ${rawResponse.trim()}`)
+  
+     // 🎯 核心修復：使用正規表達式精準抓取逗號前後的兩組數字/字元
+     // \^D008 尋找開頭
+     // ([A-Za-z0-9]+) 抓取第一組 AA
+     // , 尋找分隔逗號
+     // ([A-Za-z0-9]+) 抓取第二組 BB
+     const match = rawResponse.match(/\^D008([A-Za-z0-9]+),([A-Za-z0-9]+)/);
+  
+     if (match && match.length >= 3) { 
+       // match[1] 是 AA (最新故障代碼)
+       // match[2] 是 BB (Flash中儲存的ID)
+       const aaRaw = match[1];
+       const bbFlash = match[2];
+    
+       // 取得 AA 並確保它是兩位數字串 (例如 '1' -> '01', '0' -> '00')
+       const latestFaultCode = aaRaw.padStart(2, '0'); 
+    
+       console.log(`[解析結果] 最新錯誤 (AA): ${latestFaultCode}, Flash記錄 (BB): ${bbFlash}`);
+
+       // 撈取資料庫中該設備「正在觸發中」的錯誤紀錄
+       const { data: activeFaults, error: fetchError } = await supabase
+         .from('device_alarms')
+         .select('id, alarm_code')
+         .eq('device_id', deviceId)
+         .eq('is_active', true);
+
+       if (fetchError) throw fetchError;
+       const activeFaultCodes = (activeFaults || []).map(a => a.alarm_code);
+
+       if (latestFaultCode === '00') {
+         // [全部解除]：回傳 00 代表目前沒有系統錯誤，把所有數字錯誤碼標記為已解決
+         for (const code of activeFaultCodes) {
+           // 只解除數字碼 (保留 A-Z 告警)
+           if (code.match(/^[0-9]+$/)) {
+             await supabase.from('device_alarms')
+               .update({ is_active: false, resolved_at: new Date().toISOString() })
+               .eq('device_id', deviceId)
+               .eq('alarm_code', code)
+               .eq('is_active', true);
+             console.log(`[解除錯誤] 設備 ${deviceId}: Code ${code}`);
+           }
+         }
+       } else {
+         // [觸發]：有收到具體的錯誤碼
+         if (!activeFaultCodes.includes(latestFaultCode)) {
+           const errorMsg = FAULT_DICTIONARY[latestFaultCode] || `System Fault ${latestFaultCode} (未定義錯誤)`;
+           await supabase.from('device_alarms').insert({
+             device_id: deviceId,
+             alarm_code: latestFaultCode,
+             alarm_message: errorMsg,
+             is_active: true
+           });
+           console.log(`[新增錯誤] 設備 ${deviceId}: ${errorMsg}`);
+         } 
       
-      // 清洗字串：只保留 ^D008 之後的有效字元
-      const cleanStr = rawResponse.substring(rawResponse.indexOf('^D008') + 5).replace(/[^A-Za-z0-9,\^]/g, '');
-      const parts = cleanStr.split(',');
+         // [自動解除舊錯誤]：因為協議只給「最新」的一個錯誤，把其他的數字錯誤標記為解除
+         for (const code of activeFaultCodes) {
+           if (code.match(/^[0-9]+$/) && code !== latestFaultCode) {
+             await supabase.from('device_alarms')
+               .update({ is_active: false, resolved_at: new Date().toISOString() })
+               .eq('device_id', deviceId)
+               .eq('alarm_code', code)
+               .eq('is_active', true);
+             console.log(`[解除舊錯誤] 設備 ${deviceId}: Code ${code}`);
+           }
+         }
+       }
+     } else {
+        console.log(`[警告] ^D008 格式不符，無法解析: ${rawResponse}`);
+     }
 
-      // 陣列結構解析 (^D008AA,BB)：
-      // parts[0] = AA (最新故障代碼)
-      // parts[1] = BB (Flash中儲存的ID)
-      if (parts.length >= 2) { 
-        // 取得 AA 並補齊兩位數 (例如 '1' -> '01')
-        const latestFaultCode = parts[0].padStart(2, '0'); 
-        
-        // 撈取資料庫中該設備「正在觸發中」的錯誤紀錄
-        const { data: activeFaults, error: fetchError } = await supabase
-          .from('device_alarms')
-          .select('id, alarm_code')
-          .eq('device_id', deviceId)
-          .eq('is_active', true);
-
-        if (fetchError) throw fetchError;
-        const activeFaultCodes = (activeFaults || []).map(a => a.alarm_code);
-
-        if (latestFaultCode === '00' || latestFaultCode === '0') {
-          // [全部解除]：回傳 00 代表目前沒有系統錯誤，把所有數字錯誤碼標記為已解決
-          for (const code of activeFaultCodes) {
-            // 只解除數字碼 (保留 A-Z 告警)
-            if (code.match(/^[0-9]+$/)) {
-              await supabase.from('device_alarms')
-                .update({ is_active: false, resolved_at: new Date().toISOString() })
-                .eq('device_id', deviceId)
-                .eq('alarm_code', code)
-                .eq('is_active', true);
-              console.log(`[解除錯誤] 設備 ${deviceId}: Code ${code}`);
-            }
-          }
-        } else {
-          // [觸發]：有收到具體的錯誤碼
-          if (!activeFaultCodes.includes(latestFaultCode)) {
-            const errorMsg = FAULT_DICTIONARY[latestFaultCode] || `System Fault ${latestFaultCode} (未定義錯誤)`;
-            await supabase.from('device_alarms').insert({
-              device_id: deviceId,
-              alarm_code: latestFaultCode,
-              alarm_message: errorMsg,
-              is_active: true
-            });
-            console.log(`[新增錯誤] 設備 ${deviceId}: ${errorMsg}`);
-          } 
-          
-          // [自動解除舊錯誤]：因為協議只給「最新」的一個錯誤，所以我們可以把其他的數字錯誤標記為解除
-          for (const code of activeFaultCodes) {
-            if (code.match(/^[0-9]+$/) && code !== latestFaultCode) {
-              await supabase.from('device_alarms')
-                .update({ is_active: false, resolved_at: new Date().toISOString() })
-                .eq('device_id', deviceId)
-                .eq('alarm_code', code)
-                .eq('is_active', true);
-              console.log(`[解除舊錯誤] 設備 ${deviceId}: Code ${code}`);
-            }
-          }
-        }
-      }
-
-      return new Response(JSON.stringify({ success: true, message: 'Faults processed' }), { headers: { "Content-Type": "application/json" } })
+     return new Response(JSON.stringify({ success: true, message: 'Faults processed' }), { headers: { "Content-Type": "application/json" } })
     }
 
     // ========================================================================

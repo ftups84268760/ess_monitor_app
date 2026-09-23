@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="85dp"
+    android:height="150dp"
+    android:viewportWidth="85"
+    android:viewportHeight="150">
+    <!-- ⚠️ 請將 pathData 替換為您完整的路徑數值 -->
+    <path
+        android:fillColor="#BDBDBD"
+        android:pathData="M85,32.91c0,-10.46 -8.88,-15.16 -21.99,-18.37V8.06c0,0 0,0 0,0C63.01,3.05 53.83,0 42.5,0C31.17,0 21.99,3.05 21.99,8.06c0,0 0,0 0,0h0v6.48C8.88,17.75 0,22.45 0,32.91c0,0 0,0 0,0h0v97.83h0.01C0.29,145.9 19.2,150 42.5,150c23.3,0 42.21,-4.1 42.49,-19.25H85V32.91L85,32.91C85,32.92 85,32.92 85,32.91z"/>
+</vector>

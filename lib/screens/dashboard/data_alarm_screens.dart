@@ -692,6 +692,13 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
                         _buildMetricItem('頻率', '${_selectedLog!['ac_out_freq'] ?? '--'} Hz'),
                         _buildMetricItem('負載量', '${_selectedInvPsLog?['ac_out_power_percentage'] ?? '--'} %'),
                       ]),
+                      const SizedBox(height: 12),
+
+                      _buildHistoryCategoryCard('🌡️ 其他', [
+                        _buildMetricItem('機身內部溫度', '${_selectedLog!['inner_temp'] ?? '--'} ℃'),
+                        _buildMetricItem('最高組件溫度', '${_selectedLog!['comp_max_temp'] ?? '--'} ℃'),
+                      ]),
+                      
                     ],
                   ),
           ),
