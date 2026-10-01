@@ -12,7 +12,6 @@ class AnalysisScreen extends StatefulWidget {
   State<AnalysisScreen> createState() => _AnalysisScreenState();
 }
 
-// 🎯 加入 WidgetsBindingObserver
 class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   DateTime selectedDate = DateTime.now();
@@ -45,7 +44,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
-    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
+    WidgetsBinding.instance.addObserver(this); 
     
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && mounted) {
@@ -57,7 +56,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     _startTimer();
   }
 
-  // 🎯 抽取計時器函式
   void _startTimer() {
     _realtimeRefreshTimer?.cancel();
     _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
@@ -65,7 +63,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     });
   }
 
-  // 🎯 加入生命週期判斷
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -78,7 +75,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
+    WidgetsBinding.instance.removeObserver(this); 
     _realtimeRefreshTimer?.cancel();
     _tabController.dispose();
     super.dispose();
@@ -211,7 +208,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     if (_earliestDataDate != null) {
       final earliestOnly = DateTime(_earliestDataDate!.year, _earliestDataDate!.month, _earliestDataDate!.day);
       if (prevDateOnly.isBefore(earliestOnly)) {
-        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('該日期無歷史資料'), duration: Duration(seconds: 2)),
         );
@@ -229,7 +226,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     final nextDateOnly = DateTime(nextDate.year, nextDate.month, nextDate.day);
 
     if (nextDateOnly.isAfter(today)) {
-      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+      ScaffoldMessenger.of(context).clearSnackBars(); 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('無法選擇未來的日期時間'), duration: Duration(seconds: 2)),
       );
@@ -254,6 +251,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     final nextDateOnly = DateTime(selectedDate.year, selectedDate.month, selectedDate.day).add(const Duration(days: 1));
     final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
     if (nextDateOnly.isAfter(today)) isNextDisabled = true;
+
+    // 🎯 圖表高度依然保持與螢幕高度連動，確保圖表有足夠的呼吸空間
+    double screenHeight = MediaQuery.of(context).size.height;
+    double dynamicChartHeight = (screenHeight * 0.35).clamp(300.0, 600.0);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
@@ -318,11 +319,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
                       physics: const NeverScrollableScrollPhysics(), 
                       controller: _tabController,
                       children: [
-                        _buildOverviewTab(),
-                        _buildHomeTab(),
-                        _buildSolarTab(), 
-                        _buildBatteryTab(),
-                        _buildGridTab(),
+                        _buildOverviewTab(dynamicChartHeight),
+                        _buildHomeTab(dynamicChartHeight),
+                        _buildSolarTab(dynamicChartHeight), 
+                        _buildBatteryTab(dynamicChartHeight),
+                        _buildGridTab(dynamicChartHeight),
                       ],
                     ),
             ),
@@ -332,7 +333,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildOverviewTab() {
+  Widget _buildOverviewTab(double chartHeight) {
     double pvWatts = 0.0;
     if (_realtimeLatestInvPs != null) {
       double s1 = double.tryParse((_realtimeLatestInvPs!['solar1_input_power'] ?? 0).toString()) ?? 0.0;
@@ -406,18 +407,23 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
               ],
             ),
           ),
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 2.3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+          Column(
             children: [
-              _buildWhiteMetricCard('今日購電量(電網)', todayGridStr),
-              _buildWhiteMetricCard('今日用電量(負載)', todayLoadStr),
-              _buildWhiteMetricCard('太陽能功率', _formatPower(pvWatts)),
-              _buildWhiteMetricCard('負載量', loadPercentage),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('今日購電量(電網)', todayGridStr, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('今日用電量(負載)', todayLoadStr, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('太陽能功率', _formatPower(pvWatts), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('負載量', loadPercentage, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -426,15 +432,15 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             MapEntry(const Color(0xFFF59E0B), '太陽能 (W)'),
             MapEntry(const Color(0xFFFF5252), '電網 (W)'),
             MapEntry(const Color(0xFF10B981), '電池 (W)'),
-            MapEntry(const Color(0xFFFBBF24), '內部溫度 (°C)'), // 🎯 新增淡黃色圖例
-          ]), 
+            MapEntry(const Color(0xFFFBBF24), '內部溫度 (°C)'), 
+          ], chartHeight: chartHeight), 
           const SizedBox(height: 24), 
         ],
       ),
     );
   }
 
-  Widget _buildHomeTab() {
+  Widget _buildHomeTab(double chartHeight) {
     String acOutVR = _realtimeLatestTest?['ac_out_v_r'] != null ? '${_realtimeLatestTest!['ac_out_v_r']} V' : '--';
     String acOutVS = _realtimeLatestTest?['ac_out_v_s'] != null ? '${_realtimeLatestTest!['ac_out_v_s']} V' : '--';
     String acOutFreq = _realtimeLatestTest?['ac_out_freq'] != null ? '${_realtimeLatestTest!['ac_out_freq']} Hz' : '--';
@@ -448,18 +454,23 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       padding: const EdgeInsets.symmetric(horizontal: 14.0),
       child: Column(
         children: [
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 2.3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+          Column(
             children: [
-              _buildWhiteMetricCard('L1輸出電壓', acOutVR),
-              _buildWhiteMetricCard('L2輸出電壓', acOutVS),
-              _buildWhiteMetricCard('輸出頻率', acOutFreq),
-              _buildWhiteMetricCard('輸出功率', acOutWStr),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('L1輸出電壓', acOutVR, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('L2輸出電壓', acOutVS, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('輸出頻率', acOutFreq, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('輸出功率', acOutWStr, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -467,13 +478,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             MapEntry(const Color(0xFFC4A484), 'L1輸出電壓 (V)'),
             MapEntry(const Color(0xFFE5D3B3), 'L2輸出電壓 (V)'),
             MapEntry(const Color(0xFF2563EB), '輸出功率 (W)'),
-          ]),
+          ], chartHeight: chartHeight), 
         ],
       ),
     );
   }
 
-  Widget _buildSolarTab() {
+  Widget _buildSolarTab(double chartHeight) {
     String pv1W = _realtimeLatestInvPs?['solar1_input_power'] != null ? '${_realtimeLatestInvPs!['solar1_input_power']} W' : '--';
     String pv2W = _realtimeLatestInvPs?['solar2_input_power'] != null ? '${_realtimeLatestInvPs!['solar2_input_power']} W' : '--';
     
@@ -481,29 +492,34 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       padding: const EdgeInsets.symmetric(horizontal: 14.0),
       child: Column(
         children: [
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 2.3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+          Column(
             children: [
-              _buildWhiteMetricCard('MPPT 1發電功率', pv1W),
-              _buildWhiteMetricCard('MPPT 2發電功率', pv2W),
-              _buildWhiteMetricCard('本月總收益', 'NT\$ ${_monthlySavings.toStringAsFixed(1)}'),
-              _buildWhiteMetricCard('本年總收益', 'NT\$ ${_yearlySavings.toStringAsFixed(1)}'),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('MPPT 1發電功率', pv1W, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('MPPT 2發電功率', pv2W, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('本月總收益', 'NT\$ ${_monthlySavings.toStringAsFixed(1)}', padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('本年總收益', 'NT\$ ${_yearlySavings.toStringAsFixed(1)}', padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 16),
-          _buildSavingsChartContainer(),
+          _buildSavingsChartContainer(chartHeight), 
           const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildSavingsChartContainer() {
+  Widget _buildSavingsChartContainer(double chartHeight) {
     double maxS = 10.0;
     double dailyTotal = 0.0; 
 
@@ -515,7 +531,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
 
     return Container(
       width: double.infinity,
-      height: 320,
+      height: chartHeight, 
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white, 
@@ -583,7 +599,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildBatteryTab() {
+  Widget _buildBatteryTab(double chartHeight) {
     String batCap = _realtimeLatestTest?['battery_capacity'] != null ? '${_realtimeLatestTest!['battery_capacity']} %' : '--';
     String batV = _realtimeLatestTest?['battery_voltage'] != null ? '${_realtimeLatestTest!['battery_voltage']} V' : '--';
     String batI = _realtimeLatestTest?['battery_current'] != null ? '${_realtimeLatestTest!['battery_current']} A' : '--';
@@ -609,22 +625,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _buildWhiteMetricCard('今日充電量', chargeStr)),
+              Expanded(child: _buildWhiteMetricCard('今日充電量', chargeStr, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
               const SizedBox(width: 10),
-              Expanded(child: _buildWhiteMetricCard('今日放電量', dischargeStr)),
+              Expanded(child: _buildWhiteMetricCard('今日放電量', dischargeStr, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
             ],
           ),
           const SizedBox(height: 16),
           _buildInteractiveChartContainer('battery', [
             MapEntry(const Color(0xFF0D9488), '電池容量 (%)'),
             MapEntry(const Color(0xFF7C3AED), '電池電流 (A)'),
-          ]),
+          ], chartHeight: chartHeight), 
         ],
       ),
     );
   }
 
-  Widget _buildGridTab() {
+  Widget _buildGridTab(double chartHeight) {
     String acInVR = _realtimeLatestTest?['ac_in_v_r'] != null ? '${_realtimeLatestTest!['ac_in_v_r']} V' : '--';
     String acInVS = _realtimeLatestTest?['ac_in_v_s'] != null ? '${_realtimeLatestTest!['ac_in_v_s']} V' : '--';
     String acInFreq = _realtimeLatestTest?['ac_in_freq'] != null ? '${_realtimeLatestTest!['ac_in_freq']} Hz' : '--';
@@ -638,18 +654,23 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       padding: const EdgeInsets.symmetric(horizontal: 14.0),
       child: Column(
         children: [
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 2.3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+          Column(
             children: [
-              _buildWhiteMetricCard('L1輸入電壓', acInVR),
-              _buildWhiteMetricCard('L2輸入電壓', acInVS),
-              _buildWhiteMetricCard('市電頻率', acInFreq),
-              _buildWhiteMetricCard('輸入功率', acInWStr),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('L1輸入電壓', acInVR, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('L2輸入電壓', acInVS, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: _buildWhiteMetricCard('市電頻率', acInFreq, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildWhiteMetricCard('輸入功率', acInWStr, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -657,7 +678,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             MapEntry(const Color(0xFF9E9E9E), 'L1輸入電壓 (V)'),
             MapEntry(const Color(0xFFE0E0E0), 'L2輸入電壓 (V)'),
             MapEntry(const Color(0xFFFF5252), '輸入功率 (W)'),
-          ]),
+          ], chartHeight: chartHeight), 
         ],
       ),
     );
@@ -693,11 +714,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildInteractiveChartContainer(String mode, List<MapEntry<Color, String>> legends, {double? maxY}) {
+  Widget _buildInteractiveChartContainer(String mode, List<MapEntry<Color, String>> legends, {double? maxY, required double chartHeight}) {
     return Container(
       width: double.infinity,
-      height: 320,
-      padding: const EdgeInsets.all(16),
+      height: chartHeight, 
+      // 🎯 修改點 1：縮減圖表容器的左右內距，讓圖表能往兩側延伸
+      padding: const EdgeInsets.only(top: 16, bottom: 16, left: 4, right: 4),
       decoration: BoxDecoration(
         color: Colors.white, 
         borderRadius: BorderRadius.circular(16), 
@@ -731,15 +753,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             ),
           ),
           const SizedBox(height: 12),
-          // 🎯 替換為 Wrap：支援自動換行，解決圖例在小螢幕被裁切的問題
           Wrap(
             alignment: WrapAlignment.center,
-            spacing: 6.0,     // 圖例之間的水平間距
-            runSpacing: 10.0, // 換行後的垂直間距
+            spacing: 6.0,     
+            runSpacing: 10.0, 
             children: legends.map((item) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6.0),
               child: Row(
-                mainAxisSize: MainAxisSize.min, // 確保 Row 只佔用需要的寬度
+                mainAxisSize: MainAxisSize.min, 
                 children: [
                   Container(width: 8, height: 8, decoration: BoxDecoration(color: item.key, shape: BoxShape.circle)),
                   const SizedBox(width: 6),

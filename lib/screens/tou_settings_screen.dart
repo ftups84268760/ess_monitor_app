@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart'; 
 import 'package:supabase_flutter/supabase_flutter.dart';
+// 🎯 引入 Logger
+import '../utils/audit_logger.dart';
 
 class TouPeriod {
   final int a; 
@@ -243,6 +245,9 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
       );
 
       if (response.status == 200) {
+        // 🎯 紀錄: 變更時間電價排程 (包含所有 json 細節，以字串形式儲存)
+        await logUserAction('更改時間電價排程', details: '變更設備 $sn 排程設定: ${newTouSettingsJson.toString()}');
+
         if (mounted) {
           ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
           ScaffoldMessenger.of(context).showSnackBar(
@@ -284,7 +289,11 @@ class _TouSettingsScreenState extends State<TouSettingsScreen> {
         title: const Text('時間電價(TOU)排程', style: TextStyle(color: Colors.black87, fontSize: 17, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black87),
+        // 🎯 新增這行：強制統一使用與其他頁面相同的 iOS 風格返回鍵
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87), 
+          onPressed: () => Navigator.pop(context)
+        ),
       ),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: Colors.teal))

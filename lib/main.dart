@@ -10,6 +10,10 @@ import 'services/notification_service.dart';
 import 'screens/auth/auth_screens.dart';
 import 'screens/main_navigation_screen.dart';
 
+import 'widgets/responsive_layout.dart';
+import 'screens/web_admin_screen.dart';
+import 'package:flutter/foundation.dart'; 
+
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart'; 
 
@@ -25,7 +29,6 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // 🎯 優化：加入 try-catch 與 timeout，避免無網路時開機卡死
   try {
     await Supabase.initialize(
       url: supabaseUrl, 
@@ -108,38 +111,87 @@ class _RootScreenState extends State<RootScreen> {
   }
 
   Future<void> _initializeAppAndCheckLogin() async {
-    await Future.delayed(const Duration(milliseconds: 2200));
-
-    final prefs = await SharedPreferences.getInstance();
-    final bool autoLogin = prefs.getBool('auto_login') ?? false;
-    final session = Supabase.instance.client.auth.currentSession;
-
-    if (autoLogin && session != null) {
-      GlobalState.isPushNotificationEnabled = prefs.getBool('push_notifications_enabled') ?? true;
-      GlobalState.isBackupProtectionEnabled = prefs.getBool('backup_protection_enabled') ?? true;
-      
-      await _setupAndUploadFcmToken();
-      
-      if (mounted) {
-        setState(() {
-          _isLoggedIn = true;
-          _showSplash = false;
-        });
-      }
+    if (!kIsWeb) {
+      await Future.delayed(const Duration(milliseconds: 2200));
     } else {
-      if (autoLogin && session == null) {
-        debugPrint('⚠️ 偵測到 Session 逾時登出，強制銷毀本地推播 Token');
-        await FirebaseMessaging.instance.deleteToken();
-        await prefs.setBool('auto_login', false); 
-        
-      } else if (!autoLogin && session != null) {
-        await Supabase.instance.client.auth.signOut();
-        await FirebaseMessaging.instance.deleteToken();
+      // 🎯 給予網頁版 1.2 秒的延遲，用來完美展示 0~100% 動態進度條
+      await Future.delayed(const Duration(milliseconds: 1200));
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bool autoLogin = prefs.getBool('auto_login') ?? false;
+      var session = Supabase.instance.client.auth.currentSession;
+
+      if (kIsWeb && session != null) {
+        try {
+          final userData = await Supabase.instance.client
+              .from('profiles') 
+              .select('role')
+              .eq('id', session.user.id)
+              .maybeSingle();
+
+          final String userRole = userData?['role'] ?? '';
+
+          if (userRole != '系統管理員(root)') {
+            debugPrint('⚠️ 權限不足：非 root 管理員嘗試登入網頁版');
+            await Supabase.instance.client.auth.signOut();
+            await prefs.setBool('auto_login', false);
+            session = null; 
+          }
+        } catch (e) {
+          debugPrint('讀取權限失敗，基於安全考量強制登出: $e');
+          await Supabase.instance.client.auth.signOut();
+          session = null;
+        }
       }
 
+      if (autoLogin && session != null) {
+        GlobalState.isPushNotificationEnabled = prefs.getBool('push_notifications_enabled') ?? true;
+        GlobalState.isBackupProtectionEnabled = prefs.getBool('backup_protection_enabled') ?? true;
+        
+        if (!kIsWeb) {
+          try {
+            await _setupAndUploadFcmToken();
+            await FirebaseMessaging.instance.subscribeToTopic('system_broadcast');
+          } catch (e) {
+            debugPrint('FCM Token 處理失敗: $e');
+          }
+        }
+        
+        if (mounted) {
+          setState(() {
+            _isLoggedIn = true;
+            _showSplash = false; 
+          });
+        }
+      } else {
+        if (autoLogin && session == null) {
+          debugPrint('⚠️ 偵測到 Session 逾時登出或權限不足，強制銷毀本地推播 Token');
+          if (!kIsWeb) {
+            try { await FirebaseMessaging.instance.deleteToken(); } catch (_) {}
+          }
+          await prefs.setBool('auto_login', false); 
+          
+        } else if (!autoLogin && session != null) {
+          await Supabase.instance.client.auth.signOut();
+          if (!kIsWeb) {
+            try { await FirebaseMessaging.instance.deleteToken(); } catch (_) {}
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _isLoggedIn = false;
+            _showSplash = false; 
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('初始化發生嚴重錯誤: $e');
       if (mounted) {
         setState(() {
-          _isLoggedIn = false;
+          _isLoggedIn = false; 
           _showSplash = false;
         });
       }
@@ -149,43 +201,93 @@ class _RootScreenState extends State<RootScreen> {
   @override
   Widget build(BuildContext context) {
     if (_showSplash) {
-      return Scaffold(
-        body: Container(
-          width: double.infinity,
-          height: double.infinity,
-          decoration: const BoxDecoration(
-            color: Color(0xFF0F172A),
+      // 🎯 分流：網頁版顯示進度條，手機版顯示背景圖
+      if (kIsWeb) {
+        return Scaffold(
+          backgroundColor: const Color(0xFF0F172A),
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.bolt_rounded, size: 64, color: Colors.tealAccent),
+                const SizedBox(height: 16),
+                const Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                const SizedBox(height: 8),
+                const Text('管理後台載入中', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: 300,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0.0, end: 1.0),
+                    duration: const Duration(milliseconds: 1200), // 配合延遲時間
+                    builder: (context, value, _) {
+                      return Column(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: LinearProgressIndicator(
+                              value: value,
+                              backgroundColor: Colors.white12,
+                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.tealAccent),
+                              minHeight: 6,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            '${(value * 100).toInt()}%',
+                            style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: Image.asset(
-            'assets/splash_bg.png',
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.bolt_rounded, size: 64, color: Colors.tealAccent),
-                  SizedBox(height: 16),
-                  Text('智慧儲能控制中心', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                ],
+        );
+      } else {
+        return Scaffold(
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: const BoxDecoration(
+              color: Color(0xFF0F172A),
+            ),
+            child: Image.asset(
+              'assets/splash_bg.png',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.bolt_rounded, size: 64, color: Colors.tealAccent),
+                    SizedBox(height: 16),
+                    Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      );
+        );
+      }
     }
 
     if (_isLoggedIn) {
-      return MainNavigationScreen(onLogout: () async {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('auto_login', false);
-        
-        await FirebaseMessaging.instance.deleteToken();
-        await Supabase.instance.client.auth.signOut();
-        
-        setState(() {
-          _isLoggedIn = false;
-        });
-      });
+      return ResponsiveLayout(
+        mobileApp: MainNavigationScreen(onLogout: () async {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('auto_login', false);
+          
+          await FirebaseMessaging.instance.deleteToken();
+          await Supabase.instance.client.auth.signOut();
+          
+          setState(() {
+            _isLoggedIn = false;
+          });
+        }),
+        webAdmin: const WebAdminScreen(), 
+      );
     } else {
       return LoginScreen(onLoginSuccess: () {
         _setupAndUploadFcmToken();

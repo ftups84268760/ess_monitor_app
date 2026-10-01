@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; 
 import 'package:path_drawing/path_drawing.dart';
 import 'package:vector_math/vector_math_64.dart' as vector_math;
 import '../models/energy_path_config.dart';
@@ -69,16 +70,29 @@ class EnergyFlowPainter extends CustomPainter {
     for (var config in pathConfigs) {
       Path originalPath = parseSvgPathData(config.svgPath);
       Path finalPath = originalPath.transform(scaleMatrix.storage);
-
-      final shadowPaint = Paint()
-        ..color = Colors.black.withValues(alpha: 0.35)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0
-        ..strokeCap = StrokeCap.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
-
       final Path shadowPath = finalPath.shift(const Offset(5.5, 2.0));
-      canvas.drawPath(shadowPath, shadowPaint);
+
+      // 🎯 需求 2 解決：使用多層線條疊加模擬網頁版發光陰影
+      if (!kIsWeb) {
+        // 手機版：維持原本的高效硬體模糊濾鏡
+        final shadowPaint = Paint()
+          ..color = Colors.black.withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.0
+          ..strokeCap = StrokeCap.round
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
+        canvas.drawPath(shadowPath, shadowPaint);
+      } else {
+        // 網頁版：使用 3 層遞減透明度與遞增寬度的線條疊加
+        for (double w = 7.0; w >= 3.0; w -= 2.0) {
+          final webShadow = Paint()
+            ..color = Colors.black.withValues(alpha: 0.08)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = w
+            ..strokeCap = StrokeCap.round;
+          canvas.drawPath(shadowPath, webShadow);
+        }
+      }
 
       final baseLinePaint = Paint()
         ..color = config.baseLineColor
@@ -125,8 +139,12 @@ class EnergyFlowPainter extends CustomPainter {
           Offset headPos = headTangent.position;
 
           Paint headGlow = Paint()
-            ..color = config.particleColor.withValues(alpha: 0.85 * fadeAlpha)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.0);
+            ..color = config.particleColor.withValues(alpha: 0.85 * fadeAlpha);
+
+          if (!kIsWeb) {
+            headGlow.maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.0);
+          }
+
           canvas.drawCircle(headPos, 6.0, headGlow);
 
           Paint headCore = Paint()..color = Colors.white.withValues(alpha: fadeAlpha);
@@ -137,21 +155,26 @@ class EnergyFlowPainter extends CustomPainter {
   }
 
   void _drawGlowBeam(Canvas canvas, Path path, Color color, double fadeAlpha) {
-    Paint blurGlowPaint = Paint()
-      ..color = color.withValues(alpha: 0.45 * fadeAlpha) 
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.2
-      ..strokeCap = StrokeCap.round;
+    // 🎯 核心修改：判斷是否為網頁環境
+    if (!kIsWeb) {
+      // 手機版：維持原本具有透明度光暈效果的筆刷
+      Paint blurGlowPaint = Paint()
+        ..color = color.withValues(alpha: 0.45 * fadeAlpha) 
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.2
+        ..strokeCap = StrokeCap.round;
 
-    canvas.drawPath(path, blurGlowPaint);
+      canvas.drawPath(path, blurGlowPaint);
+    }
 
-    Paint coreBeamPaint = Paint()
-      ..color = color.withValues(alpha: 1.0 * fadeAlpha)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0
-      ..strokeCap = StrokeCap.round;
+      // 核心光束 (Core Beam) 不受影響，網頁版只畫這個
+      Paint coreBeamPaint = Paint()
+        ..color = color.withValues(alpha: 1.0 * fadeAlpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0
+        ..strokeCap = StrokeCap.round;
 
-    canvas.drawPath(path, coreBeamPaint);
+      canvas.drawPath(path, coreBeamPaint);
   }
 
   @override
@@ -199,7 +222,6 @@ class DualAxisPowerChartPainter extends CustomPainter {
     final int weekday = selectedDate.weekday; 
     final bool isSummer = (month >= 6 && month <= 9);
 
-    // 🎯 修改：將背景色塊透明度從 0.2 調降至 0.08，讓其退居幕後
     final Color peakColor = Colors.redAccent.withValues(alpha: 0.08);
     final Color midPeakColor = Colors.orangeAccent.withValues(alpha: 0.08);
     final Color offPeakColor = Colors.teal.withValues(alpha: 0.08);
@@ -254,8 +276,8 @@ class DualAxisPowerChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double leftMargin = 40.0;
-    final double rightMargin = 40.0;
+    final double leftMargin = 30.0;
+    final double rightMargin = 20.0;
     final double topMargin = 20.0;
     final double bottomMargin = 30.0;
 
@@ -334,14 +356,13 @@ class DualAxisPowerChartPainter extends CustomPainter {
       }
     }
 
-    // 🎯 定義預設格線與 0 基準強化線
     Paint defaultGridPaint = Paint()..color = Colors.grey.withValues(alpha: 0.15)..strokeWidth = 1.0;
     Paint zeroGridPaint = Paint()..color = Colors.grey.withValues(alpha: 0.45)..strokeWidth = 1.2;
 
     if (chartMode == 'battery') {
       for (int i = 0; i <= 4; i++) {
         double y = topMargin + (chartHeight / 4.0) * i;
-        Paint currentPaint = (i == 2) ? zeroGridPaint : defaultGridPaint; // 100-4*25 = 0
+        Paint currentPaint = (i == 2) ? zeroGridPaint : defaultGridPaint; 
         canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), currentPaint);
         _drawText(canvas, '${100 - i * 25}', Offset(5, y - 6), Colors.black38, 9);
         _drawText(canvas, '${100 - i * 50}', Offset(size.width - rightMargin + 5, y - 6), Colors.black38, 9);
@@ -354,7 +375,7 @@ class DualAxisPowerChartPainter extends CustomPainter {
         double y = topMargin + (chartHeight / 4.0) * i;
         double val = computedMaxKw - i * (computedMaxKw / 2.0); 
         
-        Paint currentPaint = (val.abs() < 0.01) ? zeroGridPaint : defaultGridPaint; // 若為 0 則強化
+        Paint currentPaint = (val.abs() < 0.01) ? zeroGridPaint : defaultGridPaint; 
         canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), currentPaint);
         
         String label = val.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
@@ -369,7 +390,7 @@ class DualAxisPowerChartPainter extends CustomPainter {
     } else if (chartMode == 'grid' || chartMode == 'home') {
       for (int i = 0; i <= 5; i++) {
         double y = topMargin + (chartHeight / 5.0) * i;
-        Paint currentPaint = (i == 5) ? zeroGridPaint : defaultGridPaint; // ratio = 0
+        Paint currentPaint = (i == 5) ? zeroGridPaint : defaultGridPaint; 
         canvas.drawLine(Offset(leftMargin, y), Offset(size.width - rightMargin, y), currentPaint);
         
         double ratio = (5 - i) / 5.0;
@@ -500,7 +521,6 @@ class DualAxisPowerChartPainter extends CustomPainter {
       _drawSmoothCurve(canvas, line3Points, const Color(0xFFFF5252), midY); 
       _drawSmoothCurve(canvas, line4Points, const Color(0xFF10B981), midY); 
       
-      // 🎯 修改：將溫度線設為虛線且不顯示面積填充
       _drawSmoothCurve(canvas, line5Points, const Color(0xFFFDE047), bottomY, isDashed: true, showFill: false); 
     }
 
@@ -609,7 +629,6 @@ class DualAxisPowerChartPainter extends CustomPainter {
     }
   }
 
-  // 🎯 修改：加入 isDashed 與 showFill 參數，支援畫出沒有面積填充的虛線
   void _drawSmoothCurve(Canvas canvas, List<Offset> points, Color color, double baselineY, {bool isDashed = false, bool showFill = true}) {
     if (points.isEmpty) return;
     Path path = Path()..moveTo(points.first.dx, points.first.dy);
@@ -626,19 +645,28 @@ class DualAxisPowerChartPainter extends CustomPainter {
       fillPath.lineTo(points.first.dx, baselineY);
       fillPath.close();
 
+      // 🎯 修改點 3：加入垂直線性漸層 (Shader) 取代單一顏色
+      final Rect bounds = fillPath.getBounds();
       Paint fillPaint = Paint()
-        ..color = color.withValues(alpha: 0.15) 
-        ..style = PaintingStyle.fill;
+        ..style = PaintingStyle.fill
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            color.withValues(alpha: 0.35), // 上方顏色較濃
+            color.withValues(alpha: 0.05), // 下方接近透明/白色
+          ],
+          stops: const [0.0, 1.0],
+        ).createShader(bounds);
+        
       canvas.drawPath(fillPath, fillPaint);
     }
 
     Paint strokePaint = Paint()..color = color..strokeWidth = 1.5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
     
     if (isDashed) {
-      // 繪製虛線 (需確保已 import 'package:path_drawing/path_drawing.dart')
       canvas.drawPath(dashPath(path, dashArray: CircularIntervalList<double>([4.0, 4.0])), strokePaint);
     } else {
-      // 繪製實線
       canvas.drawPath(path, strokePaint);
     }
   }

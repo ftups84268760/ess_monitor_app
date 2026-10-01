@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // 🎯 新增：引入 foundation 以使用 kIsWeb 判斷環境
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:weather_animation/weather_animation.dart';
@@ -424,9 +425,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
   }
 
-  // 🎯 核心更新功能：同步推播資料給 iOS 與 Android 的 Widget
-  // 🎯 修改原本的方法，不傳參數，直接使用 Class 內的變數
   Future<void> _updateDesktopWidget() async {
+    if (kIsWeb) return; 
+
     if (batterySoc == null) return;
     try {
       await HomeWidget.setAppGroupId('group.com.flighttechnic.ftess');
@@ -434,7 +435,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       await HomeWidget.saveWidgetData<int>('battery_soc', batterySoc!);
       await HomeWidget.saveWidgetData<String>('device_name', widget.customInverterName);
       
-      // 🎯 新增：判斷是否充電中並存入 AppGroup
       bool isCharging = batteryPowerDir == 1;
       await HomeWidget.saveWidgetData<bool>('is_charging', isCharging);
       
@@ -971,6 +971,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     const double figmaHeight = 1344.0;
     const double figmaRatio = figmaWidth / figmaHeight;
     final double statusBarHeight = MediaQuery.of(context).padding.top;
+    
+    // 🎯 新增：判斷是否為寬螢幕 (網頁後台版)
+    bool isWideScreen = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -985,7 +988,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             ),
           Positioned.fill(
             top: kToolbarHeight + statusBarHeight - 12.0,
-            bottom: MediaQuery.of(context).size.height * 0.33,
+            bottom: isWideScreen ? 24.0 : MediaQuery.of(context).size.height * 0.33,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 0.0),
               child: Column(
@@ -1151,112 +1154,115 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
               ),
             ),
           ),
-          Positioned.fill(
-            child: DraggableScrollableSheet(
-              initialChildSize: 0.33,
-              minChildSize: 0.33, 
-              maxChildSize: 0.75,
-              snap: true,         
-              builder: (BuildContext context, ScrollController scrollController) {
-                return ClipRRect(
-                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                    child: Container(
-                      color: Colors.teal.withValues(alpha: 0.08),
-                      child: ListView(
-                        controller: scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        children: [
-                          Center(child: Container(width: 40, height: 4.5, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(2)))),
-                          const SizedBox(height: 20),
-                          
-                          _buildStormBackupBanner(),
-                          _buildTariffCard(),
-                          _buildTouSettingsCard(),
-                          
-                          Row(
-                            children: [
-                              Expanded(child: _buildHalfMenuCard('今日發電量', todaySolar != null ? '${todaySolar!.toStringAsFixed(2)} kWh' : '--', icon: Icons.solar_power_rounded)),
-                              const SizedBox(width: 10),
-                              Expanded(child: _buildHalfMenuCard('今日用電量', todayLoad != null ? '${todayLoad!.toStringAsFixed(2)} kWh' : '--', icon: Icons.home_rounded)),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          
-                          Builder(
-                            builder: (context) {
-                              if (_cumulativeSolar == null || _cumulativeSolar == 0.0) {
+          
+          // 🎯 修改：只有在非寬螢幕 (手機版) 時，才顯示下方的捲動選單
+          if (!isWideScreen)
+            Positioned.fill(
+              child: DraggableScrollableSheet(
+                initialChildSize: 0.33,
+                minChildSize: 0.33, 
+                maxChildSize: 0.75,
+                snap: true,         
+                builder: (BuildContext context, ScrollController scrollController) {
+                  return ClipRRect(
+                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                      child: Container(
+                        color: Colors.teal.withValues(alpha: 0.08),
+                        child: ListView(
+                          controller: scrollController,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          children: [
+                            Center(child: Container(width: 40, height: 4.5, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(2)))),
+                            const SizedBox(height: 20),
+                            
+                            _buildStormBackupBanner(),
+                            _buildTariffCard(),
+                            _buildTouSettingsCard(),
+                            
+                            Row(
+                              children: [
+                                Expanded(child: _buildHalfMenuCard('今日發電量', todaySolar != null ? '${todaySolar!.toStringAsFixed(2)} kWh' : '--', icon: Icons.solar_power_rounded)),
+                                const SizedBox(width: 10),
+                                Expanded(child: _buildHalfMenuCard('今日用電量', todayLoad != null ? '${todayLoad!.toStringAsFixed(2)} kWh' : '--', icon: Icons.home_rounded)),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            
+                            Builder(
+                              builder: (context) {
+                                if (_cumulativeSolar == null || _cumulativeSolar == 0.0) {
+                                  return Row(
+                                    children: [
+                                      Expanded(child: _buildHalfMenuCard('累積減碳量', '--', icon: Icons.co2_rounded)),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: _buildHalfMenuCard('累積植樹棵數', '--', icon: Icons.park_rounded)),
+                                    ],
+                                  );
+                                }
+                                
+                                double carbonReduction = _cumulativeSolar! * 0.495;
+                                double treeEquivalent = carbonReduction / 12.0;
+
+                                String carbonStr;
+                                if (carbonReduction >= 1000) {
+                                  carbonStr = '${(carbonReduction / 1000).toStringAsFixed(1)} t';
+                                } else {
+                                  carbonStr = '${carbonReduction.toStringAsFixed(1)} kg';
+                                }
+
                                 return Row(
                                   children: [
-                                    Expanded(child: _buildHalfMenuCard('累積減碳量', '--', icon: Icons.co2_rounded)),
+                                    Expanded(child: _buildHalfMenuCard('累積減碳', carbonStr, icon: Icons.co2_rounded)),
                                     const SizedBox(width: 10),
-                                    Expanded(child: _buildHalfMenuCard('累積植樹棵數', '--', icon: Icons.park_rounded)),
+                                    Expanded(child: _buildHalfMenuCard('累積植樹', '${treeEquivalent.toStringAsFixed(1)} 棵', valueColor: Colors.green.shade600, icon: Icons.park_rounded)),
                                   ],
                                 );
                               }
-                              
-                              double carbonReduction = _cumulativeSolar! * 0.495;
-                              double treeEquivalent = carbonReduction / 12.0;
+                            ),
+                            const SizedBox(height: 10),
 
-                              String carbonStr;
-                              if (carbonReduction >= 1000) {
-                                carbonStr = '${(carbonReduction / 1000).toStringAsFixed(1)} t';
-                              } else {
-                                carbonStr = '${carbonReduction.toStringAsFixed(1)} kg';
-                              }
-
-                              return Row(
-                                children: [
-                                  Expanded(child: _buildHalfMenuCard('累積減碳', carbonStr, icon: Icons.co2_rounded)),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: _buildHalfMenuCard('累積植樹', '${treeEquivalent.toStringAsFixed(1)} 棵', valueColor: Colors.green.shade600, icon: Icons.park_rounded)),
-                                ],
-                              );
-                            }
-                          ),
-                          const SizedBox(height: 10),
-
-                          Row(
-                            children: [
-                              Expanded(child: _buildSelfConsumptionBarCard()),
-                              const SizedBox(width: 10),
-                              Expanded(child: _buildSocBarCard()),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          
-                          const Divider(color: Colors.black12, height: 1),
-                          const SizedBox(height: 10),
-                          
-                          ListTile(
-                            dense: true,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            tileColor: Colors.white.withValues(alpha: 0.5),
-                            leading: const CircleAvatar(backgroundColor: Colors.teal, radius: 16, child: Icon(Icons.settings_suggest_rounded, color: Colors.white, size: 16)),
-                            title: const Text('設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
-                            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black38),
-                            onTap: () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (context) => SettingsSubMenuScreen(
-                                  deviceDbId: widget.deviceDbId,
-                                  accountType: widget.accountType,
-                                  inverterSn: widget.inverterSn, 
-                                )),
-                              );
-                              _fetchRealLocationAndWeather();
-                            },
-                          ),
-                          const SizedBox(height: 30),
-                        ],
+                            Row(
+                              children: [
+                                Expanded(child: _buildSelfConsumptionBarCard()),
+                                const SizedBox(width: 10),
+                                Expanded(child: _buildSocBarCard()),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            
+                            const Divider(color: Colors.black12, height: 1),
+                            const SizedBox(height: 10),
+                            
+                            ListTile(
+                              dense: true,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              tileColor: Colors.white.withValues(alpha: 0.5),
+                              leading: const CircleAvatar(backgroundColor: Colors.teal, radius: 16, child: Icon(Icons.settings_suggest_rounded, color: Colors.white, size: 16)),
+                              title: const Text('設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
+                              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black38),
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) => SettingsSubMenuScreen(
+                                    deviceDbId: widget.deviceDbId,
+                                    accountType: widget.accountType,
+                                    inverterSn: widget.inverterSn, 
+                                  )),
+                                );
+                                _fetchRealLocationAndWeather();
+                              },
+                            ),
+                            const SizedBox(height: 30),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
         ],
       ),
     );

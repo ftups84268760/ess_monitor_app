@@ -1,11 +1,15 @@
 import 'dart:io';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'settings_screens.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+
+// 🎯 引入 Logger
+import '../utils/audit_logger.dart';
 
 // 🎯 全域共用的網路異常訊息轉換器
 String _getFriendlyErrorMsg(dynamic e) {
@@ -62,9 +66,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final String publicUrl = Supabase.instance.client.storage.from('avatars').getPublicUrl(fileName);
       await Supabase.instance.client.from('profiles').update({'avatar_url': publicUrl}).eq('id', user.id);
 
+      // 🎯 紀錄: 變更頭像
+      await logUserAction('更改個人資料', details: '上傳並更新了個人頭像圖片');
+
       widget.onProfileDataChanged();
       
-      // 🎯 Linter 規範修正：統一使用 mounted 攔截，後續操作 context 就不會報錯
       if (!mounted) return;
       setState(() { _isActionLoading = false; });
       ScaffoldMessenger.of(context).clearSnackBars(); 
@@ -126,6 +132,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               try {
                 final uid = Supabase.instance.client.auth.currentUser?.id;
                 await Supabase.instance.client.from('profiles').update({'nickname': newName}).eq('id', uid!);
+                
+                // 🎯 紀錄: 變更暱稱
+                await logUserAction('更改個人資料', details: '將個人暱稱更改為: $newName');
+                
                 widget.onProfileDataChanged();
                 
                 if (!mounted) return;
@@ -243,11 +253,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     try {
                       await Supabase.instance.client.auth.updateUser(UserAttributes(password: p1));
                       
-                      // 🎯 針對獨立的 Dialog Context 檢查
+                      // 🎯 紀錄: 變更密碼
+                      await logUserAction('更改帳號安全設定', details: '使用者成功變更了登入密碼');
+
                       if (!dialogContext.mounted) return;
                       Navigator.pop(dialogContext);
                       
-                      // 🎯 針對主畫面的 State 檢查
                       if (!mounted) return;
                       ScaffoldMessenger.of(context).clearSnackBars();
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼更新成功！', style: TextStyle(color: Colors.white)), backgroundColor: Colors.teal));
@@ -278,6 +289,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             .update({'fcm_token': null})
             .eq('id', user.id);
       }
+
+      // 🎯 紀錄: 登出 (依照平台給予不同的細節描述)
+      String platform = kIsWeb ? '網頁版後台' : '手機 APP';
+      await logUserAction('登出', details: '使用者從 $platform 登出系統');
+
     } catch (e) {
       debugPrint('清除 FCM Token 失敗: $e');
     } finally {
@@ -584,6 +600,9 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                   if (user != null) {
                     await Supabase.instance.client.storage.from('avatars').remove(['${user.id}.jpg']);
                   }
+
+                  // 🎯 紀錄: 註銷帳號 (註銷完成後使用者會立刻被登出)
+                  await logUserAction('註銷帳號', details: '使用者已主動註銷並永久刪除該帳號');
 
                   await Supabase.instance.client.rpc('delete_user_own_account');
                   await widget.onLogout();

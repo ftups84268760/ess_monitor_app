@@ -15,6 +15,7 @@ class InnerDashboardNavigation extends StatefulWidget {
   final String deviceDbId;
   final String inverterSn;
   final String accountType;
+  final bool isPushedFullScreen;
 
   const InnerDashboardNavigation({
     super.key,
@@ -23,6 +24,7 @@ class InnerDashboardNavigation extends StatefulWidget {
     required this.deviceDbId,
     required this.inverterSn,
     required this.accountType,
+    this.isPushedFullScreen = false,
   });
   @override State<InnerDashboardNavigation> createState() => _InnerDashboardNavigationState();
 }
@@ -37,10 +39,12 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
   RealtimeChannel? _deviceChannel;
   StreamSubscription<RemoteMessage>? _fcmSubscription;
 
-  // 🎯 新增：通知中心狀態變數
   List<Map<String, dynamic>> _notificationList = [];
   int get _unreadCount => _notificationList.where((n) => n['is_read'] == false).length;
   RealtimeChannel? _notificationChannel;
+
+  // 🎯 新增：紀錄當前使用者是否為該設備的擁有者
+  bool _isOwner = false;
 
   @override
   void initState() {
@@ -53,12 +57,35 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
     _setupDeviceStatusSubscription();
     _setupForegroundMessaging();
     
-    // 🎯 初始化時抓取歷史推播通知，並建立即時監聽
     _fetchNotifications();
     _setupNotificationSubscription();
+
+    // 🎯 初始化時檢查設備擁有權
+    _checkOwnership();
   }
 
-  // 🎯 抓取該設備專屬的通知紀錄
+  // 🎯 新增檢查設備擁有權的非同步函式
+  Future<void> _checkOwnership() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+      
+      final data = await Supabase.instance.client
+          .from('devices')
+          .select('user_id')
+          .eq('id', widget.deviceDbId)
+          .maybeSingle();
+          
+      if (mounted && data != null) {
+        setState(() {
+          _isOwner = data['user_id'] == user.id;
+        });
+      }
+    } catch (e) {
+      debugPrint('確認設備擁有權失敗: $e');
+    }
+  }
+
   Future<void> _fetchNotifications() async {
     try {
       final data = await Supabase.instance.client
@@ -66,7 +93,7 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
           .select()
           .eq('device_id', widget.inverterSn)
           .order('created_at', ascending: false)
-          .limit(50); // 最多顯示最近 50 筆
+          .limit(50); 
           
       if (mounted) {
         setState(() { _notificationList = List<Map<String, dynamic>>.from(data); });
@@ -76,7 +103,6 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
     }
   }
 
-  // 🎯 監聽資料庫通知表的變化 (達到即時更新紅點)
   void _setupNotificationSubscription() {
     _notificationChannel = Supabase.instance.client.channel('public:device_notifications:id=eq.${widget.inverterSn}');
     _notificationChannel!.onPostgresChanges(
@@ -85,7 +111,7 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
       table: 'device_notifications',
       filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'device_id', value: widget.inverterSn),
       callback: (payload) {
-        _fetchNotifications(); // 資料庫有變動就重新抓取
+        _fetchNotifications(); 
       },
     ).subscribe();
   }
@@ -99,7 +125,6 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
           title: message.notification!.title ?? '⚠️ 設備連線狀態通知',
           body: message.notification!.body ?? '您的設備狀態已更新',
         );
-        // 收到推播後，主動更新通知清單
         _fetchNotifications();
       }
     });
@@ -125,7 +150,7 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
   void dispose() { 
     _timer.cancel(); 
     _deviceChannel?.unsubscribe(); 
-    _notificationChannel?.unsubscribe(); // 🎯 釋放通知頻道資源
+    _notificationChannel?.unsubscribe(); 
     _fcmSubscription?.cancel(); 
     super.dispose(); 
   }
@@ -148,9 +173,9 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
   
   String _twoDigits(int n) => n >= 10 ? "$n" : "0$n";
 
-  // 🎯 將所有未讀通知標記為已讀
   Future<void> _markAllAsRead() async {
-    if (_unreadCount == 0) return;
+    // 🎯 修改點：如果是管理員且「不是擁有者」，或是沒有未讀訊息，才中止執行
+    if ((widget.accountType == '系統管理員(root)' && !_isOwner) || _unreadCount == 0) return;
     try {
       await Supabase.instance.client
           .from('device_notifications')
@@ -163,7 +188,6 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
     }
   }
 
-  // 🎯 清空所有通知
   Future<void> _clearAllNotifications() async {
     try {
       await Supabase.instance.client
@@ -171,21 +195,20 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
           .delete()
           .eq('device_id', widget.inverterSn);
       _fetchNotifications();
-      if (mounted) Navigator.pop(context); // 清空後自動關閉面板
+      if (mounted) Navigator.pop(context); 
     } catch (e) {
       debugPrint('清空通知失敗: $e');
     }
   }
 
-  // 🎯 顯示通知中心 Bottom Sheet
   void _showNotificationSheet() {
-    _markAllAsRead(); // 打開面板時自動標記已讀
+    _markAllAsRead(); 
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
-        return StatefulBuilder( // 讓 BottomSheet 也能局部刷新
+        return StatefulBuilder( 
           builder: (BuildContext context, StateSetter setSheetState) {
             return SafeArea(
               child: Column(
@@ -196,7 +219,8 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('系統通知', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                        if (_notificationList.isNotEmpty)
+                        // 🎯 修改點：增加 || _isOwner 判斷，讓身兼管理員與擁有者的帳號可以看到清除按鈕
+                        if (_notificationList.isNotEmpty && (widget.accountType != '系統管理員(root)' || _isOwner))
                           TextButton(
                             onPressed: _clearAllNotifications,
                             child: const Text('全部清除', style: TextStyle(color: Colors.redAccent)),
@@ -215,7 +239,6 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
                             separatorBuilder: (context, index) => const Divider(height: 1, indent: 20, endIndent: 20),
                             itemBuilder: (context, index) {
                               final noti = _notificationList[index];
-                              // 將時間轉回台灣時間顯示
                               final time = DateTime.parse(noti['created_at'].toString()).toLocal();
                               final timeStr = "${time.month}/${time.day} ${_twoDigits(time.hour)}:${_twoDigits(time.minute)}";
                               
@@ -246,6 +269,18 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
 
   @override
   Widget build(BuildContext context) {
+    bool isWideScreen = MediaQuery.of(context).size.width > 800;
+
+    // 🎯 核心防護：如果這個畫面是被全螢幕推出來的，且現在視窗被拉寬了，就自動退回底層的後台選單
+    if (widget.isPushedFullScreen && isWideScreen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && Navigator.canPop(context)) {
+          // 🎯 這裡加上 'resize' 標記，讓設備清單知道它是因為螢幕變寬而退場的
+          Navigator.pop(context, 'resize'); 
+        }
+      });
+    }
+    
     return PopScope(
       canPop: _currentIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
@@ -299,17 +334,19 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> {
               ),
             ],
           ),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87),
-            onPressed: () {
-              if (_currentIndex != 0) {
-                setState(() { _currentIndex = 0; });
-              } else {
-                Navigator.pop(context);
-              }
-            },
-          ),
-          // 🎯 新增：APP Bar 右側的通知小鈴鐺與紅點徽章
+          // 🎯 需求 1 解決：只在窄螢幕 (手機版) 顯示返回鍵
+          leading: MediaQuery.of(context).size.width > 800
+              ? const SizedBox.shrink()
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87),
+                  onPressed: () {
+                    if (_currentIndex != 0) {
+                      setState(() { _currentIndex = 0; });
+                    } else {
+                      Navigator.pop(context);
+                    }
+                  },
+                ),
           actions: [
             Stack(
               alignment: Alignment.center,

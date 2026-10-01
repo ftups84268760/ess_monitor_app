@@ -12,7 +12,6 @@ class RawDataScreen extends StatefulWidget {
   State<RawDataScreen> createState() => _RawDataScreenState();
 }
 
-// 🎯 加入 WidgetsBindingObserver
 class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserver {
   bool _isLoading = true;
   Map<String, dynamic>? _telemetryData;
@@ -26,7 +25,7 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
+    WidgetsBinding.instance.addObserver(this); 
     _fetchLatestTelemetry();
     _startTimer();
 
@@ -49,7 +48,6 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
     _liveTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLatestTelemetry(isSilent: true));
   }
 
-  // 🎯 加入生命週期判斷：背景暫停，前景恢復
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -62,7 +60,7 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
+    WidgetsBinding.instance.removeObserver(this); 
     _connectivitySubscription?.cancel();
     _liveTimer?.cancel();
     super.dispose();
@@ -445,7 +443,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     if (_earliestDataDate != null) {
       final earliestOnly = DateTime(_earliestDataDate!.year, _earliestDataDate!.month, _earliestDataDate!.day);
       if (prevDateOnly.isBefore(earliestOnly)) {
-        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('該日期無歷史資料'), duration: Duration(seconds: 2)),
         );
@@ -466,7 +464,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     final nextDateOnly = DateTime(nextDate.year, nextDate.month, nextDate.day);
 
     if (nextDateOnly.isAfter(today)) {
-      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+      ScaffoldMessenger.of(context).clearSnackBars(); 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('無法選擇未來的日期時間'), duration: Duration(seconds: 2)),
       );
@@ -746,7 +744,6 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
   }
 }
 
-// 🎯 加入 WidgetsBindingObserver
 class AlarmListScreen extends StatefulWidget {
   final String deviceDbId;
   const AlarmListScreen({super.key, required this.deviceDbId});
@@ -767,11 +764,14 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
   bool _isOnline = true;
   bool _isFetching = false;
 
+  // 🎯 取得正在處理中的錯誤數量
+  int get _activeFaultCount => _faultList.where((f) => f['is_active'] == true).length;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
+    WidgetsBinding.instance.addObserver(this); 
     _fetchAlarmsFromSupabase();
     _startTimer();
 
@@ -793,7 +793,6 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     _alarmTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchAlarmsFromSupabase(isSilent: true));
   }
 
-  // 🎯 加入生命週期判斷
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -806,7 +805,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
+    WidgetsBinding.instance.removeObserver(this); 
     _connectivitySubscription?.cancel();
     _alarmTimer?.cancel();
     _tabController.dispose();
@@ -888,7 +887,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     } catch (e) {
       debugPrint('取得告警清單失敗: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+        ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('讀取失敗: ${e.toString()}'), 
           backgroundColor: Colors.redAccent
@@ -1080,7 +1079,33 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
             labelColor: Colors.teal,
             unselectedLabelColor: Colors.black54,
             labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-            tabs: const [ Tab(text: '告警'), Tab(text: '錯誤') ],
+            tabs: [ 
+              const Tab(text: '告警'), 
+              // 🎯 動態標籤：當有錯誤時顯示紅色標記數量
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('錯誤'),
+                    if (_activeFaultCount > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent, 
+                          borderRadius: BorderRadius.circular(10)
+                        ),
+                        child: Text(
+                          '$_activeFaultCount', 
+                          style: const TextStyle(color: Colors.white, fontSize: 10, height: 1.1)
+                        ),
+                      )
+                    ]
+                  ],
+                ),
+              ) 
+            ],
           ),
         ),
         body: _isLoading

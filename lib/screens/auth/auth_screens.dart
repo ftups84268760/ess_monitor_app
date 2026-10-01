@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import '/utils/audit_logger.dart';
 
 // ==========================================
 // 1. 登入畫面
@@ -14,7 +16,6 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.onLoginSuccess});
 
   @override
-  // 🎯 加入 WidgetsBindingObserver 控制 Timer
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
@@ -32,12 +33,11 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // 🎯 註冊生命週期監聽
+    WidgetsBinding.instance.addObserver(this); 
     _loadSavedCredentials();
     _startHeartbeatCheck(); 
   }
 
-  // 🎯 加入生命週期判斷：背景暫停 Timer
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -49,13 +49,13 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // 🎯 移除監聽
+    WidgetsBinding.instance.removeObserver(this); 
     _heartbeatTimer?.cancel(); 
     super.dispose();
   }
 
   void _startHeartbeatCheck() {
-    _heartbeatTimer?.cancel(); // 🎯 安全防護，避免重複建立計時器
+    _heartbeatTimer?.cancel(); 
     _checkConnection(); 
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _checkConnection();
@@ -63,6 +63,13 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkConnection() async {
+    if (kIsWeb) {
+      if (!_isServerConnected && mounted) {
+        setState(() => _isServerConnected = true);
+      }
+      return;
+    }
+
     try {
       final result = await InternetAddress.lookup('google.com');
       if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
@@ -135,24 +142,69 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
     setState(() { _isLoading = true; });
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
+      final AuthResponse res = await Supabase.instance.client.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('remember_password', rememberPassword);
-      await prefs.setBool('auto_login', autoLogin);
+      if (res.session != null) {
+        // 🎯 網頁版專屬權限檢查防護網 (手動登入)
+        if (kIsWeb) {
+          try {
+            final userData = await Supabase.instance.client
+                .from('profiles') 
+                .select('role')
+                .eq('id', res.user!.id)
+                .maybeSingle();
 
-      if (rememberPassword) {
-        await prefs.setString('saved_email', _emailController.text.trim());
-        await prefs.setString('saved_password', _passwordController.text.trim());
-      } else {
-        await prefs.remove('saved_email');
-        await prefs.remove('saved_password');
+            final String userRole = userData?['role'] ?? '';
+
+            if (userRole != '系統管理員(root)') {
+              await Supabase.instance.client.auth.signOut();
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('權限不足：網頁版管理後台僅限「系統管理員(root)」登入'),
+                    backgroundColor: Colors.redAccent,
+                    duration: Duration(seconds: 4),
+                  ),
+                );
+              }
+              return; 
+            }
+          } catch (e) {
+            await Supabase.instance.client.auth.signOut();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('系統驗證異常，請稍後再試'), backgroundColor: Colors.redAccent),
+              );
+            }
+            return;
+          }
+        }
+        String platform = kIsWeb ? '網頁版管理平台' : '手機APP';
+        await logUserAction(
+          '登入', 
+          details: '使用者透過 $platform 成功登入'
+        );
+
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('remember_password', rememberPassword);
+        await prefs.setBool('auto_login', autoLogin);
+
+        if (rememberPassword) {
+          await prefs.setString('saved_email', _emailController.text.trim());
+          await prefs.setString('saved_password', _passwordController.text.trim());
+        } else {
+          await prefs.remove('saved_email');
+          await prefs.remove('saved_password');
+        }
+
+        widget.onLoginSuccess();
       }
-
-      widget.onLoginSuccess();
     } on AuthException catch (error) {
       _showErrorDialog(error.message);
     } catch (error) {
@@ -211,7 +263,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
   Future<void> _sendOtpAndShowVerificationDialog(String email) async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
-    scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
+    scaffoldMessenger.clearSnackBars(); 
     
     try {
       await Supabase.instance.client.auth.resetPasswordForEmail(email);
@@ -269,7 +321,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                   onPressed: isVerifying ? null : () async {
                     final token = otpController.text.trim();
                     if (token.length != 8) { 
-                      scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
+                      scaffoldMessenger.clearSnackBars(); 
                       scaffoldMessenger.showSnackBar(const SnackBar(content: Text('請輸入完整的8位數驗證碼')));
                       return;
                     }
@@ -288,10 +340,10 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                       _showUpdatePasswordDialog(); 
 
                     } on AuthException catch (e) {
-                      scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
+                      scaffoldMessenger.clearSnackBars(); 
                       scaffoldMessenger.showSnackBar(SnackBar(content: Text('驗證失敗：${e.message}'), backgroundColor: Colors.redAccent));
                     } catch (e) {
-                      scaffoldMessenger.clearSnackBars(); // 🎯 清空佇列
+                      scaffoldMessenger.clearSnackBars(); 
                       scaffoldMessenger.showSnackBar(const SnackBar(content: Text('發生未知錯誤'), backgroundColor: Colors.redAccent));
                     } finally {
                       setStateDialog(() { isVerifying = false; });
@@ -370,17 +422,17 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                     final p2 = confirmPasswordController.text.trim();
 
                     if (p1.isEmpty || p2.isEmpty) {
-                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                      ScaffoldMessenger.of(context).clearSnackBars(); 
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼欄位不可為空')));
                       return;
                     }
                     if (p1 != p2) {
-                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                      ScaffoldMessenger.of(context).clearSnackBars(); 
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('兩次輸入的密碼不一致')));
                       return;
                     }
                     if (p1.length < 6) {
-                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                      ScaffoldMessenger.of(context).clearSnackBars(); 
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('密碼長度至少需要6個字元')));
                       return;
                     }
@@ -392,7 +444,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                       
                       if (!context.mounted) return;
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                      ScaffoldMessenger.of(context).clearSnackBars(); 
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('密碼修改成功，請使用新密碼重新登入'), backgroundColor: Colors.teal)
                       );
@@ -401,7 +453,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                       
                     } catch (e) {
                       if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+                      ScaffoldMessenger.of(context).clearSnackBars(); 
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('密碼更新失敗，請稍後再試'), backgroundColor: Colors.redAccent)
                       );
@@ -474,110 +526,115 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                             
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(20),
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
-                                  child: Container(
-                                    padding: const EdgeInsets.all(24.0),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.6), 
-                                      borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Padding(
-                                          padding: EdgeInsets.only(bottom: 24.0),
-                                          child: Text(
-                                            'FTESS Home',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 28,
-                                              fontWeight: FontWeight.normal,
-                                              color: Colors.teal,
-                                              letterSpacing: 1.2,
-                                            ),
-                                          ),
+                              child: Center( 
+                                child: ConstrainedBox( 
+                                  constraints: const BoxConstraints(maxWidth: 400),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: BackdropFilter(
+                                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
+                                      child: Container(
+                                        padding: const EdgeInsets.all(24.0),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.6), 
+                                          borderRadius: BorderRadius.circular(20),
+                                          border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
                                         ),
-                                        TextField(
-                                          controller: _emailController,
-                                          keyboardType: TextInputType.emailAddress,
-                                          style: const TextStyle(fontSize: 13),
-                                          decoration: const InputDecoration(labelText: '電子郵件 (Email)', labelStyle: TextStyle(fontSize: 13), prefixIcon: Icon(Icons.email, size: 20), border: OutlineInputBorder()),
-                                        ),
-                                        const SizedBox(height: 16),
-                                        TextField(
-                                          controller: _passwordController,
-                                          obscureText: _obscurePassword,
-                                          style: const TextStyle(fontSize: 13),
-                                          decoration: InputDecoration(
-                                            labelText: '密碼', 
-                                            labelStyle: const TextStyle(fontSize: 13), 
-                                            prefixIcon: const Icon(Icons.lock, size: 20), 
-                                            border: const OutlineInputBorder(),
-                                            suffixIcon: IconButton(
-                                              icon: Icon(
-                                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                                                size: 20,
-                                                color: Colors.grey,
-                                              ),
-                                              onPressed: () {
-                                                setState(() {
-                                                  _obscurePassword = !_obscurePassword;
-                                                });
-                                              },
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
                                           children: [
-                                            Row(
-                                              children: [
-                                                Checkbox(value: rememberPassword, activeColor: Colors.teal, onChanged: (value) { setState(() { rememberPassword = value ?? false; }); }),
-                                                const Text('記住密碼', style: TextStyle(color: Colors.black87, fontSize: 12)),
-                                              ],
-                                            ),
-                                            Row(
-                                              children: [
-                                                Checkbox(
-                                                  value: autoLogin, activeColor: Colors.teal, 
-                                                  onChanged: (value) {
-                                                    setState(() {
-                                                      autoLogin = value ?? false;
-                                                      if (autoLogin) rememberPassword = true;
-                                                    });
-                                                  }
+                                            const Padding(
+                                              padding: EdgeInsets.only(bottom: 24.0),
+                                              child: Text(
+                                                'FTESS Home',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 28,
+                                                  fontWeight: FontWeight.normal,
+                                                  color: Colors.teal,
+                                                  letterSpacing: 1.2,
                                                 ),
-                                                const Text('自動登入', style: TextStyle(color: Colors.black87, fontSize: 12)),
+                                              ),
+                                            ),
+                                            TextField(
+                                              controller: _emailController,
+                                              keyboardType: TextInputType.emailAddress,
+                                              style: const TextStyle(fontSize: 13),
+                                              decoration: const InputDecoration(labelText: '電子郵件 (Email)', labelStyle: TextStyle(fontSize: 13), prefixIcon: Icon(Icons.email, size: 20), border: OutlineInputBorder()),
+                                            ),
+                                            const SizedBox(height: 16),
+                                            TextField(
+                                              controller: _passwordController,
+                                              obscureText: _obscurePassword,
+                                              style: const TextStyle(fontSize: 13),
+                                              decoration: InputDecoration(
+                                                labelText: '密碼', 
+                                                labelStyle: const TextStyle(fontSize: 13), 
+                                                prefixIcon: const Icon(Icons.lock, size: 20), 
+                                                border: const OutlineInputBorder(),
+                                                suffixIcon: IconButton(
+                                                  icon: Icon(
+                                                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                                    size: 20,
+                                                    color: Colors.grey,
+                                                  ),
+                                                  onPressed: () {
+                                                    setState(() {
+                                                      _obscurePassword = !_obscurePassword;
+                                                    });
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Checkbox(value: rememberPassword, activeColor: Colors.teal, onChanged: (value) { setState(() { rememberPassword = value ?? false; }); }),
+                                                    const Text('記住密碼', style: TextStyle(color: Colors.black87, fontSize: 12)),
+                                                  ],
+                                                ),
+                                                Row(
+                                                  children: [
+                                                    Checkbox(
+                                                      value: autoLogin, activeColor: Colors.teal, 
+                                                      onChanged: (value) {
+                                                        setState(() {
+                                                          autoLogin = value ?? false;
+                                                          if (autoLogin) rememberPassword = true;
+                                                        });
+                                                      }
+                                                    ),
+                                                    const Text('自動登入', style: TextStyle(color: Colors.black87, fontSize: 12)),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                                              onPressed: _isLoading ? null : _handleLogin,
+                                              child: _isLoading
+                                                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
+                                                : const Text('登入', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+                                            ),
+                                            const SizedBox(height: 16),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                TextButton(onPressed: _handleForgotPassword, child: const Text('忘記密碼？', style: TextStyle(color: Colors.black54, fontSize: 12, decoration: TextDecoration.underline))),
+                                                OutlinedButton(
+                                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), side: const BorderSide(color: Colors.teal), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                                                  onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())); },
+                                                  child: const Text('註冊新帳號', style: TextStyle(fontSize: 12, color: Colors.teal, fontWeight: FontWeight.bold)),
+                                                ),
                                               ],
                                             ),
                                           ],
                                         ),
-                                        const SizedBox(height: 8),
-                                        ElevatedButton(
-                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                                          onPressed: _isLoading ? null : _handleLogin,
-                                          child: _isLoading
-                                            ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
-                                            : const Text('登入', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            TextButton(onPressed: _handleForgotPassword, child: const Text('忘記密碼？', style: TextStyle(color: Colors.black54, fontSize: 12, decoration: TextDecoration.underline))),
-                                            OutlinedButton(
-                                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), side: const BorderSide(color: Colors.teal), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                                              onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())); },
-                                              child: const Text('註冊新帳號', style: TextStyle(fontSize: 12, color: Colors.teal, fontWeight: FontWeight.bold)),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -675,7 +732,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).clearSnackBars(); // 🎯 清空佇列
+    ScaffoldMessenger.of(context).clearSnackBars(); 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 

@@ -11,6 +11,8 @@ import 'dashboard/dtu_replacement_screen.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'dart:ui';
+// 🎯 引入 Logger
+import '../utils/audit_logger.dart';
 
 // 🎯 全域共用的網路異常訊息轉換器
 String _getFriendlyErrorMsg(dynamic e) {
@@ -480,6 +482,9 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
 
       await Supabase.instance.client.from('devices').update(updateData).eq('id', widget.deviceDbId);
 
+      // 🎯 紀錄: 變更電價方案
+      await logUserAction('更改電價方案', details: '變更為「$_selectedTariff」');
+
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定完成'), backgroundColor: Colors.teal));
@@ -697,6 +702,10 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
             .update({'backup_protection_enabled': enabled})
             .eq('id', user.id);
       }
+      
+      // 🎯 紀錄: 惡劣天氣預測切換
+      await logUserAction('更改天氣備援預測', details: '將預測提醒改為: ${enabled ? "開啟" : "關閉"}');
+
     } catch (e) {
       debugPrint('更新備援開關狀態失敗: $e'); 
     }
@@ -735,6 +744,9 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
           .from('devices')
           .update({'is_storm_backup_mode': true})
           .eq('id', widget.deviceDbId);
+
+      // 🎯 紀錄: 啟動惡劣天氣備援模式
+      await logUserAction('開啟備援模式', details: '針對設備 $sn 啟動惡劣天氣備援模式');
 
       if (mounted) {
         setState(() {
@@ -1180,6 +1192,9 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
       await Supabase.instance.client.from('devices').update({
         'address': fullAddress,
       }).eq('id', widget.deviceDbId);
+
+      // 🎯 紀錄: 變更設備安裝區域
+      await logUserAction('更改安裝區域', details: '將設備 ${_snController.text} 的安裝區域更改為: $fullAddress');
 
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
@@ -2204,6 +2219,10 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         'send-device-command',
         body: {'sn': widget.inverterSn, 'commands': ['^S011MUCHGC$currentStr\r']},
       );
+
+      // 🎯 紀錄: 變更充電電流
+      await logUserAction('更改電池參數', details: '將設備 ${widget.inverterSn} 的最大充電電流設為 $_maxAcChargeCurrent A');
+
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('充電電流設定已發送'), backgroundColor: Colors.teal));
@@ -2252,6 +2271,10 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         'send-device-command',
         body: {'sn': widget.inverterSn, 'commands': [cmd]},
       );
+
+      // 🎯 紀錄: 變更電池 SOC 參數
+      await logUserAction('更改電池參數', details: '針對設備 ${widget.inverterSn} 執行了 SOC 電位設定變更');
+
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SOC設定已發送'), backgroundColor: Colors.teal));
