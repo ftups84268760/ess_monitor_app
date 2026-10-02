@@ -26,14 +26,44 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   String _selectedDeviceName = '';
   String _selectedDeviceSn = '';
 
+  // 🎯 使用者身份與頭像狀態
+  bool _isAdmin = false;
+  bool _isRoot = false; // 🎯 新增：專門判斷是否為最高管理員(root)
+  String _userRole = '一般使用者';
+  String? _avatarUrl;
+
   @override
   void initState() {
     super.initState();
+    _fetchUserProfile(); 
+
     if (GlobalDeviceState.deviceId != null) {
       _selectedDeviceDbId = GlobalDeviceState.deviceId;
       _selectedDeviceIsOnline = GlobalDeviceState.isOnline;
       _selectedDeviceName = GlobalDeviceState.customName;
       _selectedDeviceSn = GlobalDeviceState.sn;
+    }
+  }
+
+  Future<void> _fetchUserProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    try {
+      final data = await Supabase.instance.client
+          .from('profiles')
+          .select('role, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (data != null && mounted) {
+        setState(() {
+          _userRole = data['role'] ?? '一般使用者';
+          _isAdmin = _userRole.contains('管理員') || _userRole == 'admin';
+          _isRoot = _userRole == '系統管理員(root)'; // 🎯 設定 Root 權限標記
+          _avatarUrl = data['avatar_url'];
+        });
+      }
+    } catch(e) {
+      debugPrint('讀取使用者資料失敗: $e');
     }
   }
 
@@ -47,7 +77,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final String userEmail = Supabase.instance.client.auth.currentUser?.email ?? '管理員帳號';
+    final String userEmail = Supabase.instance.client.auth.currentUser?.email ?? '使用者帳號';
 
     return Scaffold(
       body: Stack(
@@ -58,7 +88,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
             bottom: 0,
             right: 0,
             child: Container(
-              color: _selectedIndex == 1 ? Colors.white : Colors.grey.shade100,
+              color: (_selectedIndex == 1 || _selectedIndex == 2) ? Colors.white : Colors.grey.shade100,
               child: _buildRightPanelContent(), 
             ),
           ),
@@ -73,23 +103,16 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 gradient: const LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black,               
-                    Color(0xFF006400),          
-                  ],
+                  colors: [Colors.black, Color(0xFF006400)],
                 ),
                 boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    blurRadius: 20,
-                    offset: const Offset(8, 0), 
-                  ),
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(8, 0)),
                 ],
               ),
               child: Column(
                 children: [
                   const SizedBox(height: 40),
-                  const Text('FTESS Home管理平台', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('FTESS Home網頁版', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 40),
                   ListTile(
                     leading: Icon(Icons.dashboard, color: _selectedIndex == 0 ? Colors.tealAccent : Colors.white),
@@ -113,18 +136,36 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                       setState(() { _selectedIndex = 1; });
                     },
                   ),
+                  // 🎯 權限判斷：只有管理員能看見「進階功能」選單
+                  if (_isAdmin)
+                    ListTile(
+                      leading: Icon(Icons.settings_applications_rounded, color: _selectedIndex == 2 ? Colors.tealAccent : Colors.white),
+                      title: Text('進階功能', style: TextStyle(color: _selectedIndex == 2 ? Colors.tealAccent : Colors.white)),
+                      selected: _selectedIndex == 2,
+                      selectedTileColor: Colors.white.withValues(alpha: 0.15),
+                      onTap: () {
+                        setState(() { _selectedIndex = 2; });
+                      },
+                    ),
                   const Spacer(), 
                   const Divider(color: Colors.white24, height: 1),
+                  
                   ListTile(
-                    leading: const Icon(Icons.account_circle, color: Colors.white70),
-                    title: Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 12), overflow: TextOverflow.ellipsis),
+                    leading: CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Colors.white24,
+                      backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
+                      child: _avatarUrl == null ? const Icon(Icons.person, size: 20, color: Colors.white) : null,
+                    ),
+                    title: Text(userEmail, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                    subtitle: Text(_userRole, style: const TextStyle(color: Colors.white70, fontSize: 11)),
                   ),
                   ListTile(
                     leading: const Icon(Icons.logout, color: Colors.redAccent),
-                    title: const Text('登出', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    title: const Text('登出系統', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
                     onTap: () async {
                       GlobalDeviceState.clear();
-                      await logUserAction('登出', details: '系統管理員(root)自 網頁版管理平台 登出');
+                      await logUserAction('登出', details: '使用者自 網頁版管理平台 登出');
                       await Supabase.instance.client.auth.signOut();
                       if (context.mounted) {
                         Navigator.of(context).pushAndRemoveUntil(
@@ -145,6 +186,9 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   }
 
   Widget _buildRightPanelContent() {
+    if (_selectedIndex == 2 && _isAdmin) {
+      return _buildAdvancedFeaturesView(); 
+    }
     if (_selectedIndex == 1) {
       return _buildSystemSettingsView(); 
     }
@@ -155,11 +199,11 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
         isInverterOnline: _selectedDeviceIsOnline,
         deviceDbId: _selectedDeviceDbId!,
         inverterSn: _selectedDeviceSn, 
-        accountType: '系統管理員(root)',
+        accountType: _userRole, 
       );
     } else {
       return DeviceListScreen(
-        accountType: '系統管理員(root)', 
+        accountType: _userRole, 
         onSelectedInverterChanged: (String deviceDbId, bool isOnline, String customName, String sn) {
           setState(() {
             _selectedDeviceDbId = deviceDbId;
@@ -172,6 +216,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
   }
 
+  // 🎯 修改點：「系統功能」現在僅保留系統紀錄
   Widget _buildSystemSettingsView() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(40.0),
@@ -186,19 +231,49 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
             runSpacing: 24, 
             children: [
               _buildSettingCard(
+                title: '系統紀錄',
+                subtitle: '匯出指定時段的設備運作數據',
+                icon: Icons.history_edu_rounded,
+                color: Colors.purple,
+                onTap: () => _showExportLogsDialog(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🎯 新增：「進階功能」視圖，依據不同等級的管理員渲染卡片
+  Widget _buildAdvancedFeaturesView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(40.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('進階功能', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const SizedBox(height: 40),
+          
+          Wrap(
+            spacing: 24, 
+            runSpacing: 24, 
+            children: [
+              _buildSettingCard(
                 title: '使用者操作紀錄',
                 subtitle: '查詢全站使用者的操作紀錄',
                 icon: Icons.manage_search_rounded,
                 color: Colors.indigo,
                 onTap: () => _showAuditLogsDialog(),
               ),
-              _buildSettingCard(
-                title: '管理員權限',
-                subtitle: '指派或撤銷系統管理員身分',
-                icon: Icons.admin_panel_settings_rounded,
-                color: Colors.blueAccent,
-                onTap: () => _showAdminPromotionDialog(),
-              ),
+              // 🎯 Root 管理員專屬：管理員權限
+              if (_isRoot)
+                _buildSettingCard(
+                  title: '管理員權限',
+                  subtitle: '指派或撤銷系統管理員身分',
+                  icon: Icons.admin_panel_settings_rounded,
+                  color: Colors.blueAccent,
+                  onTap: () => _showAdminPromotionDialog(),
+                ),
               _buildSettingCard(
                 title: '推播公告',
                 subtitle: '發送重要營運通知或更新資訊',
@@ -207,26 +282,21 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 onTap: () => _showGlobalPushDialog(),
               ),
               _buildSettingCard(
-                title: '系統紀錄',
-                subtitle: '匯出指定時段的設備運作數據',
-                icon: Icons.history_edu_rounded,
-                color: Colors.purple,
-                onTap: () => _showExportLogsDialog(),
-              ),
-              _buildSettingCard(
                 title: '遠端偵錯',
                 subtitle: '遠端查詢逆變器狀態與參數',
                 icon: Icons.terminal_rounded,
                 color: Colors.teal,
                 onTap: () => _showRemoteDiagnosticsDialog(),
               ),
-              _buildSettingCard(
-                title: '設備所有權強制移轉',
-                subtitle: '強制轉移指定設備之所有權',
-                icon: Icons.gavel_rounded,
-                color: Colors.redAccent,
-                onTap: () => _showForceTransferDialog(),
-              ),
+              // 🎯 Root 管理員專屬：強制移轉所有權
+              if (_isRoot)
+                _buildSettingCard(
+                  title: '設備所有權強制移轉',
+                  subtitle: '強制轉移指定設備之所有權',
+                  icon: Icons.gavel_rounded,
+                  color: Colors.redAccent,
+                  onTap: () => _showForceTransferDialog(),
+                ),
             ],
           ),
         ],
@@ -278,6 +348,9 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     );
   }
 
+  // --------------------------------------------------------------------------
+  // 以下為系統管理員專屬功能對話框 (只有 _isAdmin = true 才能點擊進入)
+  // --------------------------------------------------------------------------
   void _showAuditLogsDialog() {
     final TextEditingController emailFilterController = TextEditingController();
     bool isLoading = true;
@@ -733,6 +806,191 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     );
   }
 
+  void _showForceTransferDialog() {
+    TextEditingController? snController;
+    final TextEditingController emailController = TextEditingController();
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Row(
+              children: [
+                Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
+                SizedBox(width: 8),
+                Text('設備所有權強制移轉', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.redAccent)),
+              ],
+            ),
+            content: SizedBox(
+              width: 450,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '警告：此操作將無條件立即轉移指定設備之所有權至新帳號，並強制清除該設備的所有歷史分享紀錄。請謹慎操作！', 
+                    style: TextStyle(fontSize: 13, color: Colors.redAccent, height: 1.5, fontWeight: FontWeight.bold)
+                  ),
+                  const SizedBox(height: 20),
+                  
+                  Autocomplete<String>(
+                    optionsBuilder: (TextEditingValue textEditingValue) async {
+                      if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+                      try {
+                        final res = await Supabase.instance.client
+                            .from('devices')
+                            .select('sn')
+                            .ilike('sn', '%${textEditingValue.text}%')
+                            .limit(10);
+                        return (res as List).map((e) => e['sn'].toString());
+                      } catch (e) {
+                        return const Iterable<String>.empty();
+                      }
+                    },
+                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                      snController = controller; 
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        decoration: InputDecoration(
+                          labelText: '逆變器序號 (SN)',
+                          hintText: '請輸入逆變器序號',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.redAccent, width: 2)),
+                        ),
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200, maxWidth: 418), 
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (BuildContext context, int index) {
+                                final String option = options.elementAt(index);
+                                return InkWell(
+                                  onTap: () => onSelected(option),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: Text(option, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(
+                      labelText: '接收者帳號 (電子郵件)',
+                      hintText: '請輸入接收者的註冊信箱',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.redAccent, width: 2)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
+                child: const Text('取消', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+                onPressed: isProcessing ? null : () async {
+                  final targetSn = snController?.text.trim() ?? '';
+                  final targetEmail = emailController.text.trim();
+                  
+                  if (targetSn.isEmpty || targetEmail.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('序號與接收者帳號均不得為空'), backgroundColor: Colors.orange));
+                    return;
+                  }
+
+                  setDialogState(() => isProcessing = true);
+
+                  try {
+                    final deviceData = await Supabase.instance.client
+                        .from('devices')
+                        .select('id')
+                        .eq('sn', targetSn)
+                        .maybeSingle();
+
+                    if (!dialogContext.mounted || !mounted) return; 
+
+                    if (deviceData == null) {
+                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('查無此設備序號，請重新確認'), backgroundColor: Colors.redAccent));
+                       setDialogState(() => isProcessing = false);
+                       return;
+                    }
+
+                    final int deviceId = deviceData['id'];
+
+                    final response = await Supabase.instance.client.rpc(
+                      'force_transfer_device_ownership',
+                      params: {
+                        'p_device_id': deviceId, 
+                        'p_target_email': targetEmail
+                      },
+                    );
+
+                    if (!dialogContext.mounted || !mounted) return; 
+
+                    if (response['success'] == true) {
+                      await logUserAction(
+                        '強制移轉設備', 
+                        details: '將設備 (SN: $targetSn) 強制移轉給 $targetEmail'
+                      );
+                      if (!dialogContext.mounted || !mounted) return;
+                      Navigator.pop(dialogContext);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message'] ?? '設備移轉成功！'), backgroundColor: Colors.teal));
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message'] ?? '設備移轉失敗'), backgroundColor: Colors.redAccent));
+                      setDialogState(() => isProcessing = false);
+                    }
+                  } catch (e) {
+                    if (dialogContext.mounted && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('發生錯誤: $e'), backgroundColor: Colors.redAccent));
+                      setDialogState(() => isProcessing = false);
+                    }
+                  }
+                },
+                child: isProcessing 
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('強制移轉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              )
+            ],
+          );
+        }
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // 以下為「所有人皆可使用」，但「嚴格驗證擁有權」的功能對話框
+  // --------------------------------------------------------------------------
   void _showExportLogsDialog() {
     DateTime startDate = DateTime.now().subtract(const Duration(days: 7));
     DateTime endDate = DateTime.now();
@@ -765,12 +1023,20 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                     optionsBuilder: (TextEditingValue textEditingValue) async {
                       if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
                       try {
-                        final res = await Supabase.instance.client
-                            .from('devices')
-                            .select('sn')
-                            .ilike('sn', '%${textEditingValue.text}%')
-                            .limit(10);
-                        return (res as List).map((e) => e['sn'].toString());
+                        if (_isAdmin) {
+                          final res = await Supabase.instance.client
+                              .from('devices')
+                              .select('sn')
+                              .ilike('sn', '%${textEditingValue.text}%')
+                              .limit(10);
+                          return (res as List).map((e) => e['sn'].toString());
+                        } else {
+                          final res = await Supabase.instance.client.rpc('get_accessible_devices');
+                          return (res as List)
+                              .map((e) => e['sn'].toString())
+                              .where((sn) => sn.toLowerCase().contains(textEditingValue.text.toLowerCase()))
+                              .take(10);
+                        }
                       } catch (e) {
                         return const Iterable<String>.empty();
                       }
@@ -787,9 +1053,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                         if (earliestRes.isNotEmpty) {
                           String rawTime = earliestRes.first['created_at'].toString();
                           if (rawTime.length >= 19) {
-                            setDialogState(() {
-                               earliestDataDate = DateTime.parse(rawTime.substring(0, 19));
-                            });
+                            setDialogState(() { earliestDataDate = DateTime.parse(rawTime.substring(0, 19)); });
                           }
                         }
                       } catch(e) {
@@ -811,13 +1075,10 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                               if (earliestRes.isNotEmpty) {
                                 String rawTime = earliestRes.first['created_at'].toString();
                                 if (rawTime.length >= 19) {
-                                  setDialogState(() {
-                                     earliestDataDate = DateTime.parse(rawTime.substring(0, 19));
-                                  });
+                                  setDialogState(() { earliestDataDate = DateTime.parse(rawTime.substring(0, 19)); });
                                 }
                               }
                             } catch(e) {
-                              // 加上這行把錯誤印出來，或者留個註解也可以
                               debugPrint('焦點離開時查詢最早日期失敗: $e');
                             }
                          }
@@ -955,6 +1216,18 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                   setDialogState(() => isDownloading = true);
 
                   try {
+                    if (!_isAdmin) {
+                      final check = await Supabase.instance.client.rpc('get_accessible_devices');
+                      if (!context.mounted) return; 
+                      
+                      final allowedSns = (check as List).map((e) => e['sn'].toString()).toList();
+                      if (!allowedSns.contains(targetSn)) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('權限不足，您只能匯出擁有的設備紀錄'), backgroundColor: Colors.redAccent));
+                        setDialogState(() => isDownloading = false);
+                        return;
+                      }
+                    }
+
                     final startDay = DateTime(startDate.year, startDate.month, startDate.day, 0, 0, 0);
                     final startIso = startDay.toIso8601String();
                     
@@ -1113,199 +1386,21 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     );
   }
 
-  void _showForceTransferDialog() {
-    TextEditingController? snController;
-    final TextEditingController emailController = TextEditingController();
-    bool isProcessing = false;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Row(
-              children: [
-                Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
-                SizedBox(width: 8),
-                Text('設備所有權強制移轉', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.redAccent)),
-              ],
-            ),
-            content: SizedBox(
-              width: 450,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '警告：此操作將無條件立即轉移指定設備之所有權至新帳號，並強制清除該設備的所有歷史分享紀錄。請謹慎操作！', 
-                    style: TextStyle(fontSize: 13, color: Colors.redAccent, height: 1.5, fontWeight: FontWeight.bold)
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  Autocomplete<String>(
-                    optionsBuilder: (TextEditingValue textEditingValue) async {
-                      if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-                      try {
-                        final res = await Supabase.instance.client
-                            .from('devices')
-                            .select('sn')
-                            .ilike('sn', '%${textEditingValue.text}%')
-                            .limit(10);
-                        return (res as List).map((e) => e['sn'].toString());
-                      } catch (e) {
-                        return const Iterable<String>.empty();
-                      }
-                    },
-                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                      snController = controller; 
-                      return TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        decoration: InputDecoration(
-                          labelText: '逆變器序號 (SN)',
-                          hintText: '請輸入逆變器序號',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.redAccent, width: 2)),
-                        ),
-                      );
-                    },
-                    optionsViewBuilder: (context, onSelected, options) {
-                      return Align(
-                        alignment: Alignment.topLeft,
-                        child: Material(
-                          elevation: 4,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 200, maxWidth: 418), 
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              shrinkWrap: true,
-                              itemCount: options.length,
-                              itemBuilder: (BuildContext context, int index) {
-                                final String option = options.elementAt(index);
-                                return InkWell(
-                                  onTap: () => onSelected(option),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: Text(option, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  TextField(
-                    controller: emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: '接收者帳號 (電子郵件)',
-                      hintText: '請輸入接收者的註冊帳號 (電子郵件)',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.redAccent, width: 2)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
-                child: const Text('取消', style: TextStyle(color: Colors.grey)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-                onPressed: isProcessing ? null : () async {
-                  final targetSn = snController?.text.trim() ?? '';
-                  final targetEmail = emailController.text.trim();
-                  
-                  if (targetSn.isEmpty || targetEmail.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('序號與接收者帳號均不得為空'), backgroundColor: Colors.orange));
-                    return;
-                  }
-
-                  setDialogState(() => isProcessing = true);
-
-                  try {
-                    final deviceData = await Supabase.instance.client
-                        .from('devices')
-                        .select('id')
-                        .eq('sn', targetSn)
-                        .maybeSingle();
-
-                    if (!dialogContext.mounted || !mounted) return; 
-
-                    if (deviceData == null) {
-                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('查無此設備序號，請重新確認'), backgroundColor: Colors.redAccent));
-                       setDialogState(() => isProcessing = false);
-                       return;
-                    }
-
-                    final int deviceId = deviceData['id'];
-
-                    final response = await Supabase.instance.client.rpc(
-                      'force_transfer_device_ownership',
-                      params: {
-                        'p_device_id': deviceId, 
-                        'p_target_email': targetEmail
-                      },
-                    );
-
-                    if (!dialogContext.mounted || !mounted) return; 
-
-                    if (response['success'] == true) {
-                      await logUserAction(
-                        '強制移轉設備', 
-                        details: '將設備 (SN: $targetSn) 強制移轉給 $targetEmail'
-                      );
-                      if (!dialogContext.mounted || !mounted) return;
-                      Navigator.pop(dialogContext);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message'] ?? '設備移轉成功！'), backgroundColor: Colors.teal));
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message'] ?? '設備移轉失敗'), backgroundColor: Colors.redAccent));
-                      setDialogState(() => isProcessing = false);
-                    }
-                  } catch (e) {
-                    if (dialogContext.mounted && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('發生錯誤: $e'), backgroundColor: Colors.redAccent));
-                      setDialogState(() => isProcessing = false);
-                    }
-                  }
-                },
-                child: isProcessing 
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('強制移轉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              )
-            ],
-          );
-        }
-      ),
-    );
-  }
-
   void _showRemoteDiagnosticsDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const RemoteDiagnosticsDialog(),
+      builder: (context) => RemoteDiagnosticsDialog(isAdmin: _isAdmin), 
     );
   }
 }
 
+// --------------------------------------------------------------------------
+// 獨立元件：遠端偵錯
+// --------------------------------------------------------------------------
 class RemoteDiagnosticsDialog extends StatefulWidget {
-  const RemoteDiagnosticsDialog({super.key});
+  final bool isAdmin; 
+  const RemoteDiagnosticsDialog({super.key, required this.isAdmin});
 
   @override
   State<RemoteDiagnosticsDialog> createState() => _RemoteDiagnosticsDialogState();
@@ -1344,15 +1439,12 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
 
   void _appendToTerminal(String message) {
     if (!mounted) return;
-    
     final now = DateTime.now();
     final timestamp = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
                       '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    
     setState(() {
       _terminalLines.add('$timestamp $message');
     });
-    
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -1368,6 +1460,20 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
     if (targetSn.isEmpty) {
       _appendToTerminal('[系統] ⚠️ 請先輸入逆變器序號');
       return;
+    }
+
+    if (!widget.isAdmin) {
+      try {
+        final check = await Supabase.instance.client.rpc('get_accessible_devices');
+        final allowedSns = (check as List).map((e) => e['sn'].toString()).toList();
+        if (!allowedSns.contains(targetSn)) {
+          _appendToTerminal('[系統] ❌ 權限不足，無法連線至非您擁有的設備');
+          return;
+        }
+      } catch(e) {
+        _appendToTerminal('[系統] ❌ 權限驗證失敗');
+        return;
+      }
     }
 
     if (_isConnected) {
@@ -1447,7 +1553,7 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
 
   Future<void> _sendCommand() async {
     if (!_isConnected || _connectedSn == null) {
-      _appendToTerminal('[系統] ⚠️️ 請先連線至逆變器，才能發送指令');
+      _appendToTerminal('[系統] ⚠ 請先連線至逆變器，才能發送指令');
       return;
     }
 
@@ -1528,12 +1634,20 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
                     optionsBuilder: (TextEditingValue textEditingValue) async {
                       if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
                       try {
-                        final res = await Supabase.instance.client
-                            .from('devices')
-                            .select('sn')
-                            .ilike('sn', '%${textEditingValue.text}%')
-                            .limit(10);
-                        return (res as List).map((e) => e['sn'].toString());
+                        if (widget.isAdmin) {
+                          final res = await Supabase.instance.client
+                              .from('devices')
+                              .select('sn')
+                              .ilike('sn', '%${textEditingValue.text}%')
+                              .limit(10);
+                          return (res as List).map((e) => e['sn'].toString());
+                        } else {
+                          final res = await Supabase.instance.client.rpc('get_accessible_devices');
+                          return (res as List)
+                              .map((e) => e['sn'].toString())
+                              .where((sn) => sn.toLowerCase().contains(textEditingValue.text.toLowerCase()))
+                              .take(10);
+                        }
                       } catch (e) {
                         return const Iterable<String>.empty();
                       }

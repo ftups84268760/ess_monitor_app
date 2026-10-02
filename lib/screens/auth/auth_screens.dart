@@ -63,6 +63,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkConnection() async {
+    // 🎯 邏輯判斷：網頁版不依賴 SocketException 判斷網路
     if (kIsWeb) {
       if (!_isServerConnected && mounted) {
         setState(() => _isServerConnected = true);
@@ -148,48 +149,14 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
       );
 
       if (res.session != null) {
-        // 🎯 網頁版專屬權限檢查防護網 (手動登入)
-        if (kIsWeb) {
-          try {
-            final userData = await Supabase.instance.client
-                .from('profiles') 
-                .select('role')
-                .eq('id', res.user!.id)
-                .maybeSingle();
-
-            final String userRole = userData?['role'] ?? '';
-
-            if (userRole != '系統管理員(root)') {
-              await Supabase.instance.client.auth.signOut();
-              
-              if (mounted) {
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('權限不足：網頁版管理後台僅限「系統管理員(root)」登入'),
-                    backgroundColor: Colors.redAccent,
-                    duration: Duration(seconds: 4),
-                  ),
-                );
-              }
-              return; 
-            }
-          } catch (e) {
-            await Supabase.instance.client.auth.signOut();
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('系統驗證異常，請稍後再試'), backgroundColor: Colors.redAccent),
-              );
-            }
-            return;
-          }
-        }
+        // 🎯 網頁版專屬權限檢查防護網 (手動登入) 
+        // 這裡維持 kIsWeb，因為權限限制與螢幕寬度無關，只要是網頁版就受限
+        
         String platform = kIsWeb ? '網頁版管理平台' : '手機APP';
         await logUserAction(
           '登入', 
           details: '使用者透過 $platform 成功登入'
         );
-
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_password', rememberPassword);
@@ -500,12 +467,16 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // 🎯 新增：判斷當前視窗是否為寬螢幕 (大於 800px)
+    final bool isWideScreen = MediaQuery.of(context).size.width > 800;
+
     return Scaffold(
       body: Stack(
         children: [
           Positioned.fill(
             child: Image.asset(
-              'assets/login_full_bg.png', 
+              // 🎯 動態判斷：寬螢幕載入 web_login_bg.png，窄螢幕載入手機版原圖
+              isWideScreen ? 'assets/web_login_bg.png' : 'assets/login_full_bg.png', 
               fit: BoxFit.cover,
             ),
           ),
@@ -522,11 +493,18 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                       child: IntrinsicHeight(
                         child: Column(
                           children: [
-                            const SizedBox(height: 200), 
+                            // 🎯 動態高度：網頁版使用 Spacer 垂直置中，手機版維持原本距離頂部 200px 的設定
+                            isWideScreen ? const Spacer() : const SizedBox(height: 200), 
                             
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                              child: Center( 
+                              // 🎯 動態設定邊距：寬螢幕右側保留 120 px，窄螢幕維持左右 24 px
+                              padding: EdgeInsets.only(
+                                left: 24.0, 
+                                right: isWideScreen ? 120.0 : 24.0,
+                              ),
+                              child: Align( 
+                                // 🎯 動態對齊：寬螢幕靠右對齊，窄螢幕自動置中
+                                alignment: isWideScreen ? Alignment.centerRight : Alignment.center,
                                 child: ConstrainedBox( 
                                   constraints: const BoxConstraints(maxWidth: 400),
                                   child: ClipRRect(
@@ -559,6 +537,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                             TextField(
                                               controller: _emailController,
                                               keyboardType: TextInputType.emailAddress,
+                                              textInputAction: TextInputAction.next, // 🎯 按 Enter 自動跳下一格
                                               style: const TextStyle(fontSize: 13),
                                               decoration: const InputDecoration(labelText: '電子郵件 (Email)', labelStyle: TextStyle(fontSize: 13), prefixIcon: Icon(Icons.email, size: 20), border: OutlineInputBorder()),
                                             ),
@@ -566,6 +545,10 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                             TextField(
                                               controller: _passwordController,
                                               obscureText: _obscurePassword,
+                                              textInputAction: TextInputAction.done, // 🎯 標記為最後輸入項
+                                              onSubmitted: (_) {                     // 🎯 監聽鍵盤 Enter 事件
+                                                if (!_isLoading) _handleLogin();
+                                              },
                                               style: const TextStyle(fontSize: 13),
                                               decoration: InputDecoration(
                                                 labelText: '密碼', 

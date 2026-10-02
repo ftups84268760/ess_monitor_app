@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'; // 🎯 新增：引入 foundation 以使用 kIsWeb 判斷環境
+import 'package:flutter/foundation.dart'; 
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:weather_animation/weather_animation.dart';
@@ -69,6 +69,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   bool _hasCheckedFirstTimeSetup = false;
+  
+  bool _isTouPanelVisible = false;
 
   bool get _isAllDataNull => pvPower == null && gridPower == null && loadPower == null && batterySoc == null;
   int get _effectiveDcAcDir => (!widget.isDeviceOnline || _isAllDataNull) ? 0 : dcAcPowerDir;
@@ -412,6 +414,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     loadPower = double.tryParse((data['ac_out_total_active_power'] ?? 0).toString());
     batteryPowerDir = int.tryParse((data['battery_power_direction'] ?? 0).toString()) ?? 0;
     if (data['created_at'] != null) _lastUpdateTime = _formatTimestamp(data['created_at'].toString());
+    
+    // 🎯 修復 2：當收到即時發電數據變更時，立即重新撈取並更新「發電收益」數據
+    _fetchSavingsData();
   }
 
   void _updateTestData(Map<String, dynamic> data) {
@@ -498,6 +503,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           } else { batterySoc = null; }
         });
       }
+      
+      // 🎯 修復 2：在每 5 秒的常規輪詢中，也一併確保收益數據是最新的
+      _fetchSavingsData();
+      
     } catch (e) {
       if (mounted) setState(() { pvPower = null; gridPower = null; loadPower = null; todaySolar = null; todayLoad = null; batterySoc = null; });
     } finally {
@@ -637,9 +646,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
   }
 
-  Widget _buildTariffCard() {
-    final details = _getCurrentTariffDetails(_rawTariffMode);
-    
+  Widget _buildTariffContent(Map<String, String> details, double maxSaved) {
     final Color seasonColor = details['season'] == '夏月' ? Colors.orange : Colors.blueAccent;
     Color periodColor = Colors.teal;
     if (details['period'] == '尖峰時段') {
@@ -648,6 +655,100 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       periodColor = Colors.orange;
     }
 
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('計價模式', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+            Text(_rawTariffMode, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('當前狀態', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: seasonColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                  child: Text(details['season']!, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: seasonColor)),
+                ),
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: periodColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                  child: Text('${details['period']} (${details['rate']} 元)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: periodColor)),
+                ),
+              ],
+            )
+          ],
+        ),
+        const SizedBox(height: 16),
+        
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('今日各時段收益 (NT\$)', style: TextStyle(fontSize: 11, color: Colors.black45, fontWeight: FontWeight.bold)),
+            Text('總計: \$ ${_todayTotalSavings.toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // 🎯 修復 1：增加容器高度到 110px，避免數字或文字過大導致折行與破版
+        SizedBox(
+          height: 110,
+          child: _savingsData.isEmpty
+              ? const Center(child: Text('尚無今日收益數據', style: TextStyle(fontSize: 11, color: Colors.black26)))
+              : ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _savingsData.length,
+                  itemBuilder: (context, index) {
+                    final item = _savingsData[index];
+                    final String period = item['period'];
+                    final double saved = item['saved'];
+                    final int hour = item['hour'];
+                    
+                    Color barColor = Colors.teal.shade300;
+                    if (period == '尖峰') barColor = Colors.redAccent.shade200;
+                    if (period == '半尖峰') barColor = Colors.orangeAccent;
+
+                    double barHeight = (saved / maxSaved) * 50.0;
+                    if (barHeight < 2 && saved > 0) barHeight = 2;
+
+                    return Container(
+                      // 🎯 稍微加寬每根柱子的間距空間，避免數字擠在一起
+                      width: 32,
+                      margin: const EdgeInsets.only(right: 6),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(saved > 0 ? saved.toStringAsFixed(1) : '', style: const TextStyle(fontSize: 9, color: Colors.black54)),
+                          const SizedBox(height: 2),
+                          Container(
+                            width: 16,
+                            height: barHeight,
+                            decoration: BoxDecoration(
+                              color: barColor,
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(hour.toString().padLeft(2, '0'), style: const TextStyle(fontSize: 9, color: Colors.black38)),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTariffCard() {
+    final details = _getCurrentTariffDetails(_rawTariffMode);
     double maxSaved = 0;
     for (var item in _savingsData) {
       if (item['saved'] > maxSaved) maxSaved = item['saved'];
@@ -683,88 +784,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                 color: Colors.white.withValues(alpha: 0.4),
                 borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('計價模式', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
-                      Text(_rawTariffMode, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('當前狀態', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(color: seasonColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-                            child: Text(details['season']!, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: seasonColor)),
-                          ),
-                          const SizedBox(width: 4),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(color: periodColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-                            child: Text('${details['period']} (${details['rate']} 元)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: periodColor)),
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  const Text('今日各時段收益 (NT\$)', style: TextStyle(fontSize: 11, color: Colors.black45, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 80,
-                    child: _savingsData.isEmpty
-                        ? const Center(child: Text('尚無今日收益數據', style: TextStyle(fontSize: 11, color: Colors.black26)))
-                        : ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _savingsData.length,
-                            itemBuilder: (context, index) {
-                              final item = _savingsData[index];
-                              final String period = item['period'];
-                              final double saved = item['saved'];
-                              final int hour = item['hour'];
-                              
-                              Color barColor = Colors.teal.shade300;
-                              if (period == '尖峰') barColor = Colors.redAccent.shade200;
-                              if (period == '半尖峰') barColor = Colors.orangeAccent;
-
-                              double barHeight = (saved / maxSaved) * 50.0;
-                              if (barHeight < 2 && saved > 0) barHeight = 2;
-
-                              return Container(
-                                width: 28,
-                                margin: const EdgeInsets.only(right: 6),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Text(saved > 0 ? saved.toStringAsFixed(1) : '', style: const TextStyle(fontSize: 9, color: Colors.black54)),
-                                    const SizedBox(height: 2),
-                                    Container(
-                                      width: 16,
-                                      height: barHeight,
-                                      decoration: BoxDecoration(
-                                        color: barColor,
-                                        borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(hour.toString().padLeft(2, '0'), style: const TextStyle(fontSize: 9, color: Colors.black38)),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
+              child: _buildTariffContent(details, maxSaved),
             ),
           ],
         ),
@@ -772,26 +792,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     );
   }
 
-  Widget _buildTouSettingsCard() {
-    if (_touSettings == null && !_isStormBackupMode) return const SizedBox.shrink();
-
-    final bool isSeason = _touSettings?['isSeasonModeEnabled'] ?? false;
-    final int startM = _touSettings?['summerStartMonth'] ?? 6;
-    final int endM = _touSettings?['summerEndMonth'] ?? 9;
-
-    bool isManualBackup = false;
-    if (_touSettings != null && !isSeason) {
-      final slot0 = _touSettings!['winterSlot0'];
-      final slot1 = _touSettings!['winterSlot1'];
-      if (slot0 != null && slot1 != null &&
-          slot0['state'] == 1 && slot0['start'] == '00:00' && slot0['end'] == '00:00' &&
-          slot1['state'] == 1 && slot1['start'] == '00:00' && slot1['end'] == '00:00') {
-        isManualBackup = true;
-      }
-    }
-
-    final bool isEffectivelyBackup = _isStormBackupMode || isManualBackup;
-
+  Widget _buildTouSettingsContent(bool isEffectivelyBackup, bool isSeason, int startM, int endM) {
     Widget buildSlot(String title, Map<String, dynamic>? slot) {
       if (slot == null) return const SizedBox.shrink();
       int state = slot['state'] ?? 0;
@@ -818,6 +819,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         ),
       );
     }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isEffectivelyBackup) ...[
+          Text(
+            _isStormBackupMode ? '惡劣天氣備援模式' : '全天候備援模式', 
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade700)
+          ),
+          buildSlot('時段 1', {'state': 1, 'start': '00:00', 'end': '00:00'}),
+          buildSlot('時段 2', {'state': 1, 'start': '00:00', 'end': '00:00'}),
+        ] else if (isSeason) ...[
+          Text('夏月排程 ($startM月~$endM月)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange)),
+          buildSlot('時段 1', _touSettings!['summerSlot0']),
+          buildSlot('時段 2', _touSettings!['summerSlot1']),
+          const SizedBox(height: 10),
+          const Text('非夏月排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+          buildSlot('時段 1', _touSettings!['winterSlot0']),
+          buildSlot('時段 2', _touSettings!['winterSlot1']),
+        ] else ...[
+          const Text('全年排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
+          buildSlot('時段 1', _touSettings!['winterSlot0']),
+          buildSlot('時段 2', _touSettings!['winterSlot1']),
+        ]
+      ],
+    );
+  }
+
+  Widget _buildTouSettingsCard() {
+    if (_touSettings == null && !_isStormBackupMode) return const SizedBox.shrink();
+
+    final bool isSeason = _touSettings?['isSeasonModeEnabled'] ?? false;
+    final int startM = _touSettings?['summerStartMonth'] ?? 6;
+    final int endM = _touSettings?['summerEndMonth'] ?? 9;
+
+    bool isManualBackup = false;
+    if (_touSettings != null && !isSeason) {
+      final slot0 = _touSettings!['winterSlot0'];
+      final slot1 = _touSettings!['winterSlot1'];
+      if (slot0 != null && slot1 != null &&
+          slot0['state'] == 1 && slot0['start'] == '00:00' && slot0['end'] == '00:00' &&
+          slot1['state'] == 1 && slot1['start'] == '00:00' && slot1['end'] == '00:00') {
+        isManualBackup = true;
+      }
+    }
+
+    final bool isEffectivelyBackup = _isStormBackupMode || isManualBackup;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -854,31 +902,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                 color: Colors.white.withValues(alpha: 0.4),
                 borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isEffectivelyBackup) ...[
-                    Text(
-                      _isStormBackupMode ? '惡劣天氣備援模式' : '全天候備援模式', 
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade700)
-                    ),
-                    buildSlot('時段 1', {'state': 1, 'start': '00:00', 'end': '00:00'}),
-                    buildSlot('時段 2', {'state': 1, 'start': '00:00', 'end': '00:00'}),
-                  ] else if (isSeason) ...[
-                    Text('夏月排程 ($startM月~$endM月)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange)),
-                    buildSlot('時段 1', _touSettings!['summerSlot0']),
-                    buildSlot('時段 2', _touSettings!['summerSlot1']),
-                    const SizedBox(height: 10),
-                    const Text('非夏月排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
-                    buildSlot('時段 1', _touSettings!['winterSlot0']),
-                    buildSlot('時段 2', _touSettings!['winterSlot1']),
-                  ] else ...[
-                    const Text('全年排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
-                    buildSlot('時段 1', _touSettings!['winterSlot0']),
-                    buildSlot('時段 2', _touSettings!['winterSlot1']),
-                  ]
-                ],
-              ),
+              child: _buildTouSettingsContent(isEffectivelyBackup, isSeason, startM, endM),
             ),
           ],
         ),
@@ -972,7 +996,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     const double figmaRatio = figmaWidth / figmaHeight;
     final double statusBarHeight = MediaQuery.of(context).padding.top;
     
-    // 🎯 新增：判斷是否為寬螢幕 (網頁後台版)
     bool isWideScreen = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
@@ -1155,7 +1178,131 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             ),
           ),
           
-          // 🎯 修改：只有在非寬螢幕 (手機版) 時，才顯示下方的捲動選單
+          if (isWideScreen)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              top: 0,
+              bottom: 0,
+              right: _isTouPanelVisible ? 0 : -320, 
+              child: Center( 
+                child: Row(
+                  mainAxisSize: MainAxisSize.min, 
+                  crossAxisAlignment: CrossAxisAlignment.center, 
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _isTouPanelVisible = !_isTouPanelVisible;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.70),
+                          borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(-2, 2))
+                          ]
+                        ),
+                        child: Icon(
+                          _isTouPanelVisible ? Icons.arrow_forward_ios_rounded : Icons.analytics_rounded, 
+                          color: Colors.teal, 
+                          size: 22
+                        ),
+                      ),
+                    ),
+                    
+                    SizedBox(
+                      width: 320, 
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                          child: Container(
+                            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.5),
+                              borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                              boxShadow: [
+                                BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))
+                              ]
+                            ),
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.price_change_outlined, color: Colors.teal, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Expanded(child: Text('今日預估發電收益', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87))),
+                                      InkWell(
+                                        onTap: () => setState(() => _isTouPanelVisible = false),
+                                        child: const Icon(Icons.close_rounded, size: 18, color: Colors.black38),
+                                      )
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Builder(
+                                    builder: (context) {
+                                      final details = _getCurrentTariffDetails(_rawTariffMode);
+                                      double maxSaved = 0;
+                                      for (var item in _savingsData) {
+                                        if (item['saved'] > maxSaved) maxSaved = item['saved'];
+                                      }
+                                      if (maxSaved == 0) maxSaved = 1; 
+                                      return _buildTariffContent(details, maxSaved);
+                                    }
+                                  ),
+                                  
+                                  if (_touSettings != null || _isStormBackupMode) ...[
+                                    const Divider(height: 32, color: Colors.black12),
+                                    const Row(
+                                      children: [
+                                        Icon(Icons.schedule_rounded, color: Colors.teal, size: 18),
+                                        SizedBox(width: 8),
+                                        Expanded(child: Text('時間電價(TOU)排程', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87))),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Builder(
+                                      builder: (context) {
+                                        final bool isSeason = _touSettings?['isSeasonModeEnabled'] ?? false;
+                                        final int startM = _touSettings?['summerStartMonth'] ?? 6;
+                                        final int endM = _touSettings?['summerEndMonth'] ?? 9;
+
+                                        bool isManualBackup = false;
+                                        if (_touSettings != null && !isSeason) {
+                                          final slot0 = _touSettings!['winterSlot0'];
+                                          final slot1 = _touSettings!['winterSlot1'];
+                                          if (slot0 != null && slot1 != null &&
+                                              slot0['state'] == 1 && slot0['start'] == '00:00' && slot0['end'] == '00:00' &&
+                                              slot1['state'] == 1 && slot1['start'] == '00:00' && slot1['end'] == '00:00') {
+                                            isManualBackup = true;
+                                          }
+                                        }
+                                        final bool isEffectivelyBackup = _isStormBackupMode || isManualBackup;
+                                        return _buildTouSettingsContent(isEffectivelyBackup, isSeason, startM, endM);
+                                      }
+                                    ),
+                                  ]
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          
           if (!isWideScreen)
             Positioned.fill(
               child: DraggableScrollableSheet(

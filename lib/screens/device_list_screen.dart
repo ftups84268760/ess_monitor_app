@@ -475,14 +475,12 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                       );
                     }
 
-                    // 🎯 修改點：改用 GridView 來呈現卡片式佈局
-                    // 🎯 修改點：移除固定高度，讓內容自然撐開
                     return GridView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      // 🎯 修改點：放棄使用會讓卡片變矮的比例，改用更充裕的固定高度與寬度
                       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 400, // 每張卡片最大寬度 400
-                        // 移除 mainAxisExtent: 180，改由 childAspectRatio 稍微控制比例，或者直接依賴內部高度
-                        childAspectRatio: 1.8, // 依據寬高比例自動計算高度，1.8 是一個適合這種卡片的舒適比例
+                        maxCrossAxisExtent: 450, // 🎯 放大最大寬度：從 400 改為 450，避免太早切換成 3 欄導致卡片過窄
+                        mainAxisExtent: 230,     // 🎯 設定安全固定高度：確保足夠容納所有文字資訊與底部按鈕
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
                       ),
@@ -586,7 +584,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                     ),
                                     const SizedBox(height: 12),
                                     
-                                    // 中間：詳細資訊區塊 (移除 Expanded，改為自然堆疊並控制間距)
+                                    // 中間：詳細資訊區塊
                                     Row(
                                       children: [
                                         const Icon(Icons.qr_code, size: 14, color: Colors.black54),
