@@ -112,7 +112,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
               child: Column(
                 children: [
                   const SizedBox(height: 40),
-                  const Text('FTESS Home網頁版', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 40),
                   ListTile(
                     leading: Icon(Icons.dashboard, color: _selectedIndex == 0 ? Colors.tealAccent : Colors.white),
