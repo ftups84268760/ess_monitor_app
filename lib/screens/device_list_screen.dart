@@ -42,7 +42,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   RealtimeChannel? _realtimeChannel;
   String _filterMode = '全部'; 
   
-  // 🎯 將資料改為 State 管理，方便計算標籤數量
   bool _isLoading = true;
   List<Map<String, dynamic>> _devices = [];
 
@@ -51,7 +50,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _setupRealtimeSubscription();
-    _fetchData(); // 初始載入
+    _fetchData(); 
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndAutoPush();
@@ -88,12 +87,33 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     _realtimeChannel = Supabase.instance.client
         .channel('public:devices')
         .onPostgresChanges(
-          event: PostgresChangeEvent.update, 
+          // 🎯 效能優化 1：監聽所有變更，以便精細分類處理
+          event: PostgresChangeEvent.all, 
           schema: 'public',
           table: 'devices',
           callback: (payload) {
-            debugPrint('🔄 收到資料庫即時更新，自動重整畫面...');
-            _reloadDeviceList(); 
+            // 🎯 效能優化 2：針對高頻率的 UPDATE 事件，直接更新本地變數，絕對不發送資料庫請求！
+            if (payload.eventType == PostgresChangeEvent.update) {
+              final newRecord = payload.newRecord;
+              if (newRecord.isNotEmpty && mounted) {
+                setState(() {
+                  // 找到變更的那台設備
+                  final index = _devices.indexWhere((d) => d['id'].toString() == newRecord['id'].toString());
+                  if (index != -1) {
+                    // 保留本地已經計算好的錯誤狀態 (因為 device_alarms 沒有變更)
+                    final bool currentFault = _devices[index]['has_active_fault'] ?? false;
+                    // 將新數值合併進本地列表
+                    _devices[index] = {..._devices[index], ...newRecord};
+                    _devices[index]['has_active_fault'] = currentFault;
+                  }
+                });
+              }
+            } 
+            // 🎯 效能優化 3：只有發生極低頻的新增/刪除設備事件時，才真正重新下載列表
+            else if (payload.eventType == PostgresChangeEvent.insert || payload.eventType == PostgresChangeEvent.delete) {
+              debugPrint('🔄 設備列表發生增減，重新撈取資料庫...');
+              _reloadDeviceList();
+            }
           },
         )
         .subscribe();
@@ -106,7 +126,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     }
   }
 
-  // 🎯 觸發資料重新抓取
   Future<void> _reloadDeviceList() async {
     await _fetchData();
   }
@@ -138,7 +157,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
       
       List<Map<String, dynamic>> devices = response.map((item) => Map<String, dynamic>.from(item as Map)).toList();
 
-      // 🎯 向 device_alarms 查詢這些設備是否有未解除的錯誤
       if (devices.isNotEmpty) {
         List<String> snList = devices.map((d) => (d['sn'] ?? '').toString()).where((s) => s.isNotEmpty).toList();
         
@@ -152,13 +170,11 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           Set<String> faultedSns = {};
           for (var row in faultRes) {
             String code = (row['alarm_code'] ?? '').toString();
-            // 判斷是否為「錯誤」(純數字)
             if (RegExp(r'^[0-9]+$').hasMatch(code)) {
               faultedSns.add(row['device_id'].toString());
             }
           }
 
-          // 將錯誤狀態標記回設備列表中
           for (var d in devices) {
             d['has_active_fault'] = faultedSns.contains(d['sn'].toString());
           }
@@ -254,7 +270,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
 
                   await logUserAction('更改設備名稱', details: '將設備改名為: $newName');
       
-                _reloadDeviceList();
+                // 註：這裡我們不主動呼叫 _reloadDeviceList(); 因為 Realtime WebSocket 會攔截 UPDATE 事件並自動在本地更新 UI
               } catch (e) {
                 debugPrint('設備改名失敗: $e');
               }
@@ -285,7 +301,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     }
   }
 
-  // 🎯 將 FilterChip 改為接收真實標籤 (包含數量)
   Widget _buildFilterChip(String mode, int count) {
     final bool isSelected = _filterMode == mode;
     final String displayLabel = '$mode($count)';
@@ -338,7 +353,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     final String currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
     final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin' || widget.accountType == '系統管理員(root)';
 
-    // 🎯 統計各標籤的數量
     int totalCount = _devices.length;
     int onlineCount = _devices.where((d) => d['is_online'] == true).length;
     int offlineCount = totalCount - onlineCount;
@@ -477,10 +491,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
 
                     return GridView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      // 🎯 修改點：放棄使用會讓卡片變矮的比例，改用更充裕的固定高度與寬度
                       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 450, // 🎯 放大最大寬度：從 400 改為 450，避免太早切換成 3 欄導致卡片過窄
-                        mainAxisExtent: 230,     // 🎯 設定安全固定高度：確保足夠容納所有文字資訊與底部按鈕
+                        maxCrossAxisExtent: 450, 
+                        mainAxisExtent: 230,     
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
                       ),
@@ -501,7 +514,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                           statusColor = Colors.green;
                         }
 
-                        // 🎯 重新設計的卡片內容
                         Widget deviceCard = Container(
                           key: ValueKey(deviceId),
                           decoration: BoxDecoration(
@@ -550,7 +562,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    // 頂部：圖示、名稱與狀態燈號
                                     Row(
                                       children: [
                                         Container(
@@ -584,7 +595,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                     ),
                                     const SizedBox(height: 12),
                                     
-                                    // 中間：詳細資訊區塊
                                     Row(
                                       children: [
                                         const Icon(Icons.qr_code, size: 14, color: Colors.black54),
@@ -619,9 +629,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                       ],
                                     ),
                                     
-                                    const Spacer(), // 將按鈕推到最下方
+                                    const Spacer(), 
                                     
-                                    // 底部：操作按鈕
                                     if (isOwner)
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.end,

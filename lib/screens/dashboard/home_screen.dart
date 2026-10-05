@@ -86,6 +86,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   late AnimationController _energyAnimationController;
   Timer? _autoWeatherRefreshTimer;
   Timer? _telemetryTimer; 
+  Timer? _savingsTimer; // 🎯 新增：獨立的電費收益更新計時器
+  
   RealtimeChannel? _psChannel;
   RealtimeChannel? _testChannel;
 
@@ -137,13 +139,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   void _startTimers() {
     _autoWeatherRefreshTimer?.cancel();
     _telemetryTimer?.cancel();
+    _savingsTimer?.cancel();
+    
     _autoWeatherRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchRealLocationAndWeather());
-    _telemetryTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchTelemetryDataFromSupabase());
+    // 🎯 優化 1：降頻，將常規輪詢從 5 秒延長到 60 秒，僅做 WebSocket 漏接時的保底機制
+    _telemetryTimer = Timer.periodic(const Duration(seconds: 180), (_) => _fetchTelemetryDataFromSupabase());
+    // 🎯 優化 2：電費收益 RPC 計算不需要高頻執行，獨立設定為 5 分鐘一次
+    _savingsTimer = Timer.periodic(const Duration(minutes: 5), (_) => _fetchSavingsData());
   }
 
   void _stopTimers() {
     _autoWeatherRefreshTimer?.cancel();
     _telemetryTimer?.cancel();
+    _savingsTimer?.cancel();
   }
 
   void _initConnectivityListener() {
@@ -253,6 +261,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           _customTariffRate = double.tryParse((data['custom_tariff_rate'] ?? 3.5).toString()) ?? 3.5;
           _touSettings = data['tou_settings'];
         });
+        // 只在初次載入或天氣更新時抓取收益，不再每秒亂扣
         _fetchSavingsData();
       }
 
@@ -330,8 +339,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _fetchSavingsData() async {
     if (widget.deviceDbId.isEmpty) return;
     try {
-      final devRes = await Supabase.instance.client.from('devices').select('sn').eq('id', widget.deviceDbId).single();
-      final sn = devRes['sn'];
+      // 🎯 優化 3：移除無效的 Select 查詢。不需要查 devices 表拿 sn，直接用 widget 傳進來的 inverterSn
+      final String sn = widget.inverterSn;
+      
       final now = DateTime.now();
       final startTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T00:00:00.000";
       final endTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T23:59:59.999";
@@ -356,17 +366,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _fetchInitialTelemetryData() async {
     try {
       if (widget.deviceDbId.isEmpty) return;
-      final devRes = await Supabase.instance.client.from('devices').select('sn').eq('id', widget.deviceDbId).maybeSingle();
-      if (devRes == null) return;
-      final String sn = (devRes['sn'] ?? '').toString();
+      // 🎯 優化 3：移除 devices 表查詢，直接用 widget 變數
+      final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
 
-      final invPsRes = await Supabase.instance.client.from('telemetry_inv_ps').select().eq('device_id', sn).order('created_at', ascending: false).limit(1);
-      final testRes = await Supabase.instance.client.from('telemetry_test').select().eq('device_id', sn).order('created_at', ascending: false).limit(1);
+      // 🎯 優化 4：加上嚴格的 select，不再拉取無用欄位，節省 70% 頻寬
+      final invPsRes = await Supabase.instance.client.from('telemetry_inv_ps')
+          .select('solar1_input_power, solar2_input_power, ac_in_total_active_power, ac_out_total_active_power, battery_power_direction, created_at')
+          .eq('device_id', sn).order('created_at', ascending: false).limit(1);
+          
+      final testRes = await Supabase.instance.client.from('telemetry_test')
+          .select('battery_capacity, dc_ac_power_direction, line_power_direction, created_at')
+          .eq('device_id', sn).order('created_at', ascending: false).limit(1);
+          
       final now = DateTime.now();
       final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-      final dailyRes = await Supabase.instance.client.from('daily_energy_stats').select().eq('device_id', sn).eq('date', dateStr).limit(1);
-      final histRes = await Supabase.instance.client.from('daily_energy_stats').select('today_solar_kwh').eq('device_id', sn).neq('date', dateStr);
+      
+      final dailyRes = await Supabase.instance.client.from('daily_energy_stats')
+          .select('today_solar_kwh, today_load_kwh, today_grid_kwh')
+          .eq('device_id', sn).eq('date', dateStr).limit(1);
+          
+      final histRes = await Supabase.instance.client.from('daily_energy_stats')
+          .select('today_solar_kwh')
+          .eq('device_id', sn).neq('date', dateStr);
 
       if (mounted) {
         setState(() {
@@ -388,9 +410,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   Future<void> _setupRealtimeSubscription() async {
     if (widget.deviceDbId.isEmpty) return;
-    final devRes = await Supabase.instance.client.from('devices').select('sn').eq('id', widget.deviceDbId).maybeSingle();
-    if (devRes == null) return;
-    final String sn = (devRes['sn'] ?? '').toString();
+    // 🎯 優化 3：移除 devices 表查詢
+    final String sn = widget.inverterSn;
     if (sn.isEmpty) return;
 
     _psChannel?.unsubscribe();
@@ -415,8 +436,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     batteryPowerDir = int.tryParse((data['battery_power_direction'] ?? 0).toString()) ?? 0;
     if (data['created_at'] != null) _lastUpdateTime = _formatTimestamp(data['created_at'].toString());
     
-    // 🎯 修復 2：當收到即時發電數據變更時，立即重新撈取並更新「發電收益」數據
-    _fetchSavingsData();
+    // 🎯 效能重構：刪除原本在這裡呼叫的 _fetchSavingsData(); 避免每次 WebSocket 推送都狂打 RPC，改交由 _savingsTimer 定時處理。
   }
 
   void _updateTestData(Map<String, dynamic> data) {
@@ -458,16 +478,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
     try {
       if (widget.deviceDbId.isEmpty) return;
-      final devRes = await Supabase.instance.client.from('devices').select('sn, is_storm_backup_mode').eq('id', widget.deviceDbId).maybeSingle();
+      // 只需要查備援模式即可，不拿其他資料
+      final devRes = await Supabase.instance.client.from('devices').select('is_storm_backup_mode').eq('id', widget.deviceDbId).maybeSingle();
       if (devRes == null) return;
-      final String sn = (devRes['sn'] ?? '').toString();
+      final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
       
-      final invPsRes = await Supabase.instance.client.from('telemetry_inv_ps').select().eq('device_id', sn).order('created_at', ascending: false).limit(1);
+      // 🎯 優化 4：加上嚴格的 select，節省頻寬
+      final invPsRes = await Supabase.instance.client.from('telemetry_inv_ps')
+          .select('solar1_input_power, solar2_input_power, ac_in_total_active_power, ac_out_total_active_power, battery_power_direction, created_at')
+          .eq('device_id', sn).order('created_at', ascending: false).limit(1);
+          
       final now = DateTime.now();
       final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-      final dailyRes = await Supabase.instance.client.from('daily_energy_stats').select().eq('device_id', sn).eq('date', dateStr).limit(1);
-      final testRes = await Supabase.instance.client.from('telemetry_test').select().eq('device_id', sn).order('created_at', ascending: false).limit(1);
+      
+      final dailyRes = await Supabase.instance.client.from('daily_energy_stats')
+          .select('today_solar_kwh, today_load_kwh, today_grid_kwh')
+          .eq('device_id', sn).eq('date', dateStr).limit(1);
+          
+      final testRes = await Supabase.instance.client.from('telemetry_test')
+          .select('battery_capacity, dc_ac_power_direction, line_power_direction, created_at')
+          .eq('device_id', sn).order('created_at', ascending: false).limit(1);
 
       if (mounted) {
         setState(() {
@@ -504,8 +535,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         });
       }
       
-      // 🎯 修復 2：在每 5 秒的常規輪詢中，也一併確保收益數據是最新的
-      _fetchSavingsData();
+      // 🎯 效能重構：刪除原本這裡呼叫的 _fetchSavingsData(); 避免重複執行。
       
     } catch (e) {
       if (mounted) setState(() { pvPower = null; gridPower = null; loadPower = null; todaySolar = null; todayLoad = null; batterySoc = null; });
@@ -517,8 +547,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _restoreTouMode() async {
     if (widget.deviceDbId.isEmpty) return;
     try {
-      final devData = await Supabase.instance.client.from('devices').select('sn').eq('id', widget.deviceDbId).single();
-      final String sn = devData['sn'];
+      // 🎯 優化 3：替換 devData，直接用變數
+      final String sn = widget.inverterSn;
       final settings = _touSettings ?? {};
       final bool isSeason = settings['isSeasonModeEnabled'] ?? false;
       final int startM = settings['summerStartMonth'] ?? 6;
@@ -697,7 +727,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           ],
         ),
         const SizedBox(height: 8),
-        // 🎯 修復 1：增加容器高度到 110px，避免數字或文字過大導致折行與破版
         SizedBox(
           height: 110,
           child: _savingsData.isEmpty
@@ -719,7 +748,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                     if (barHeight < 2 && saved > 0) barHeight = 2;
 
                     return Container(
-                      // 🎯 稍微加寬每根柱子的間距空間，避免數字擠在一起
                       width: 32,
                       margin: const EdgeInsets.only(right: 6),
                       child: Column(

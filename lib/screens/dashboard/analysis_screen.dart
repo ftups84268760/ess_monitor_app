@@ -58,7 +58,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
 
   void _startTimer() {
     _realtimeRefreshTimer?.cancel();
-    _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+    // 🎯 效能優化 1：將高耗能的圖表與統計資料輪詢，從 3 秒降頻至 60 秒
+    _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
       _fetchRealtimeLatestAndHistoryData(isSilent: true);
     });
   }
@@ -112,12 +113,27 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       final dayStart = "${dateFormatted}T00:00:00.000Z";
       final dayEnd = "${dateFormatted}T23:59:59.999Z";
 
-      final latestTest = await Supabase.instance.client.from('telemetry_test').select().eq('device_id', sn).order('created_at', ascending: false).limit(1);
-      final latestInvPs = await Supabase.instance.client.from('telemetry_inv_ps').select().eq('device_id', sn).order('created_at', ascending: false).limit(1);
-      final dailyStats = await Supabase.instance.client.from('daily_energy_stats').select().eq('device_id', sn).eq('date', dateFormatted).limit(1);
+      // 🎯 效能優化 2：針對最新資料，精準選取會用到的欄位
+      final latestTest = await Supabase.instance.client.from('telemetry_test')
+          .select('battery_capacity, battery_voltage, battery_current, ac_out_v_r, ac_out_v_s, ac_out_freq, ac_in_v_r, ac_in_v_s, ac_in_freq, created_at')
+          .eq('device_id', sn).order('created_at', ascending: false).limit(1);
+          
+      final latestInvPs = await Supabase.instance.client.from('telemetry_inv_ps')
+          .select('solar1_input_power, solar2_input_power, ac_out_power_percentage, ac_out_total_active_power, ac_in_total_active_power, created_at')
+          .eq('device_id', sn).order('created_at', ascending: false).limit(1);
+          
+      final dailyStats = await Supabase.instance.client.from('daily_energy_stats')
+          .select('today_load_kwh, today_grid_kwh, today_charge_kwh, today_discharge_kwh')
+          .eq('device_id', sn).eq('date', dateFormatted).limit(1);
       
-      final historyTest = await Supabase.instance.client.from('telemetry_test').select().eq('device_id', sn).gte('created_at', dayStart).lte('created_at', dayEnd).order('created_at', ascending: true).limit(1000);
-      final historyInvPs = await Supabase.instance.client.from('telemetry_inv_ps').select().eq('device_id', sn).gte('created_at', dayStart).lte('created_at', dayEnd).order('created_at', ascending: true).limit(1000);
+      // 🎯 效能優化 3：圖表需要撈取高達 1000 筆資料，務必嚴格限制欄位，避免 Egress 流量爆表
+      final historyTest = await Supabase.instance.client.from('telemetry_test')
+          .select('battery_capacity, battery_current, ac_out_v_r, ac_out_v_s, ac_in_v_r, ac_in_v_s, inner_temperature, created_at')
+          .eq('device_id', sn).gte('created_at', dayStart).lte('created_at', dayEnd).order('created_at', ascending: true).limit(1000);
+          
+      final historyInvPs = await Supabase.instance.client.from('telemetry_inv_ps')
+          .select('solar1_input_power, solar2_input_power, ac_out_total_active_power, ac_in_total_active_power, battery_power_direction, created_at')
+          .eq('device_id', sn).gte('created_at', dayStart).lte('created_at', dayEnd).order('created_at', ascending: true).limit(1000);
 
       if (mounted) {
         setState(() {
@@ -252,7 +268,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
     if (nextDateOnly.isAfter(today)) isNextDisabled = true;
 
-    // 🎯 圖表高度依然保持與螢幕高度連動，確保圖表有足夠的呼吸空間
     double screenHeight = MediaQuery.of(context).size.height;
     double dynamicChartHeight = (screenHeight * 0.35).clamp(300.0, 600.0);
 
@@ -718,7 +733,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     return Container(
       width: double.infinity,
       height: chartHeight, 
-      // 🎯 修改點 1：縮減圖表容器的左右內距，讓圖表能往兩側延伸
       padding: const EdgeInsets.only(top: 16, bottom: 16, left: 4, right: 4),
       decoration: BoxDecoration(
         color: Colors.white, 
