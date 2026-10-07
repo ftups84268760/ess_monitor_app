@@ -1,4 +1,5 @@
 import 'dart:convert'; 
+import 'dart:async'; 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart'; 
@@ -26,16 +27,20 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   String _selectedDeviceName = '';
   String _selectedDeviceSn = '';
 
-  // 🎯 使用者身份與頭像狀態
   bool _isAdmin = false;
-  bool _isRoot = false; // 🎯 新增：專門判斷是否為最高管理員(root)
+  bool _isRoot = false; 
   String _userRole = '一般使用者';
   String? _avatarUrl;
+
+  Timer? _loginTimer;
+  DateTime? _loginTime;
+  String _loginDurationStr = '00:00:00';
 
   @override
   void initState() {
     super.initState();
     _fetchUserProfile(); 
+    _initLoginTimer(); 
 
     if (GlobalDeviceState.deviceId != null) {
       _selectedDeviceDbId = GlobalDeviceState.deviceId;
@@ -43,6 +48,27 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
       _selectedDeviceName = GlobalDeviceState.customName;
       _selectedDeviceSn = GlobalDeviceState.sn;
     }
+  }
+
+  void _initLoginTimer() {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user?.lastSignInAt != null) {
+      _loginTime = DateTime.parse(user!.lastSignInAt!).toLocal();
+    } else {
+      _loginTime = DateTime.now();
+    }
+
+    _loginTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_loginTime != null && mounted) {
+        final diff = DateTime.now().difference(_loginTime!);
+        final h = diff.inHours.toString().padLeft(2, '0');
+        final m = (diff.inMinutes % 60).toString().padLeft(2, '0');
+        final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
+        setState(() {
+          _loginDurationStr = '$h:$m:$s';
+        });
+      }
+    });
   }
 
   Future<void> _fetchUserProfile() async {
@@ -58,7 +84,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
         setState(() {
           _userRole = data['role'] ?? '一般使用者';
           _isAdmin = _userRole.contains('管理員') || _userRole == 'admin';
-          _isRoot = _userRole == '系統管理員(root)'; // 🎯 設定 Root 權限標記
+          _isRoot = _userRole == '系統管理員(root)'; 
           _avatarUrl = data['avatar_url'];
         });
       }
@@ -69,6 +95,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
 
   @override
   void dispose() {
+    _loginTimer?.cancel(); 
     if (_selectedDeviceDbId != null) {
       GlobalDeviceState.needsNarrowPush = true;
     }
@@ -136,7 +163,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                       setState(() { _selectedIndex = 1; });
                     },
                   ),
-                  // 🎯 權限判斷：只有管理員能看見「進階功能」選單
                   if (_isAdmin)
                     ListTile(
                       leading: Icon(Icons.settings_applications_rounded, color: _selectedIndex == 2 ? Colors.tealAccent : Colors.white),
@@ -158,7 +184,15 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                       child: _avatarUrl == null ? const Icon(Icons.person, size: 20, color: Colors.white) : null,
                     ),
                     title: Text(userEmail, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                    subtitle: Text(_userRole, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(_userRole, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                        const SizedBox(height: 2),
+                        Text('已登入時間: $_loginDurationStr', style: const TextStyle(color: Colors.tealAccent, fontSize: 10)),
+                      ],
+                    ),
                   ),
                   ListTile(
                     leading: const Icon(Icons.logout, color: Colors.redAccent),
@@ -216,7 +250,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
   }
 
-  // 🎯 修改點：「系統功能」現在僅保留系統紀錄
   Widget _buildSystemSettingsView() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(40.0),
@@ -244,7 +277,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     );
   }
 
-  // 🎯 新增：「進階功能」視圖，依據不同等級的管理員渲染卡片
   Widget _buildAdvancedFeaturesView() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(40.0),
@@ -265,7 +297,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 color: Colors.indigo,
                 onTap: () => _showAuditLogsDialog(),
               ),
-              // 🎯 Root 管理員專屬：管理員權限
               if (_isRoot)
                 _buildSettingCard(
                   title: '管理員權限',
@@ -275,8 +306,8 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                   onTap: () => _showAdminPromotionDialog(),
                 ),
               _buildSettingCard(
-                title: '推播公告',
-                subtitle: '發送重要營運通知或更新資訊',
+                title: '全域公告',
+                subtitle: '發送重要官方通知及管理歷史資訊',
                 icon: Icons.campaign_rounded,
                 color: Colors.orange,
                 onTap: () => _showGlobalPushDialog(),
@@ -288,7 +319,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 color: Colors.teal,
                 onTap: () => _showRemoteDiagnosticsDialog(),
               ),
-              // 🎯 Root 管理員專屬：強制移轉所有權
               if (_isRoot)
                 _buildSettingCard(
                   title: '設備所有權強制移轉',
@@ -348,9 +378,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     );
   }
 
-  // --------------------------------------------------------------------------
-  // 以下為系統管理員專屬功能對話框 (只有 _isAdmin = true 才能點擊進入)
-  // --------------------------------------------------------------------------
   void _showAuditLogsDialog() {
     final TextEditingController emailFilterController = TextEditingController();
     bool isLoading = true;
@@ -407,7 +434,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 const Icon(Icons.manage_search_rounded, color: Colors.indigo, size: 28),
                 const SizedBox(width: 8),
                 const Expanded(
-                  child: Text('系統操作紀錄', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))
+                  child: Text('使用者操作紀錄', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
@@ -446,9 +473,13 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                           ..click();
                       }
 
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ 操作紀錄已成功匯出！'), backgroundColor: Colors.teal));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ 操作紀錄已成功匯出！'), backgroundColor: Colors.teal));
+                      }
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗: $e'), backgroundColor: Colors.redAccent));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗: $e'), backgroundColor: Colors.redAccent));
+                      }
                     } finally {
                       if (dialogContext.mounted) {
                         setDialogState(() => isDownloading = false);
@@ -561,6 +592,9 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   void _showAdminPromotionDialog() {
     final TextEditingController emailController = TextEditingController();
     bool isProcessing = false;
+    bool isLoadingList = true;
+    List<Map<String, dynamic>> adminList = [];
+    bool isInitialized = false;
 
     showDialog(
       context: context,
@@ -568,8 +602,31 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           
-          Future<void> changeAdminRole(bool makeAdmin) async {
-            final email = emailController.text.trim();
+          Future<void> loadAdmins() async {
+            setDialogState(() => isLoadingList = true);
+            try {
+              final res = await Supabase.instance.client.rpc('get_admin_users');
+              if (dialogContext.mounted) {
+                setDialogState(() {
+                  adminList = List<Map<String, dynamic>>.from(res);
+                  isLoadingList = false;
+                });
+              }
+            } catch (e) {
+              debugPrint('讀取管理員清單失敗: $e');
+              if (dialogContext.mounted) setDialogState(() => isLoadingList = false);
+            }
+          }
+
+          if (!isInitialized) {
+            isInitialized = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              loadAdmins();
+            });
+          }
+
+          Future<void> changeAdminRole(bool makeAdmin, {String? targetEmail}) async {
+            final email = targetEmail ?? emailController.text.trim();
             if (email.isEmpty) {
               ScaffoldMessenger.of(context).clearSnackBars(); 
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請輸入欲設定的帳號信箱'), backgroundColor: Colors.orange));
@@ -585,7 +642,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                   content: Text('確定要將 $email 降級為一般使用者嗎？\n對方將立即失去全系統設備的檢視與操作權限。', style: const TextStyle(height: 1.5)),
                   actions: [
                     TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
-                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('確定撤銷', style: TextStyle(color: Colors.red))),
+                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('確定', style: TextStyle(color: Colors.red))),
                   ],
                 )
               );
@@ -601,15 +658,18 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 params: {'target_email': email},
               );
 
-              if (!dialogContext.mounted || !mounted) return;
+              if (!dialogContext.mounted || !context.mounted) return;
 
               if (response['success'] == true) {
                 await logUserAction(
                   '權限變動', 
                   details: '將帳號 $email ${makeAdmin ? '升級為系統管理員' : '降級為一般使用者'}'
                 );
-                if (!dialogContext.mounted || !mounted) return;
-                Navigator.pop(dialogContext); 
+                
+                emailController.clear();
+                await loadAdmins(); 
+                
+                if (!dialogContext.mounted || !context.mounted) return;
                 ScaffoldMessenger.of(context).clearSnackBars(); 
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.teal));
               } else {
@@ -617,7 +677,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message']), backgroundColor: Colors.redAccent));
               }
             } catch (e) {
-              if (dialogContext.mounted && mounted) {
+              if (dialogContext.mounted && context.mounted) {
                 ScaffoldMessenger.of(context).clearSnackBars(); 
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('發生錯誤: $e'), backgroundColor: Colors.redAccent));
               }
@@ -633,13 +693,13 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
               children: [
                 Icon(Icons.admin_panel_settings_rounded, color: Colors.blueAccent, size: 28),
                 SizedBox(width: 8),
-                Text('管理員權限設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Text('管理員權限', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               ],
             ),
             content: SizedBox(
-              width: 450,
+              width: 550, 
+              height: 500, 
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -656,46 +716,100 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  TextField(
-                    controller: emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: '輸入欲設定的帳號 (電子郵件)',
-                      hintText: 'example@email.com',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.blueAccent, width: 2)),
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: InputDecoration(
+                            labelText: '輸入欲設定的帳號 (電子郵件)',
+                            hintText: 'example@email.com',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.blueAccent, width: 2)),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueAccent,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          elevation: 0,
+                        ),
+                        onPressed: isProcessing ? null : () => changeAdminRole(true),
+                        icon: isProcessing 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.add_moderator_rounded, size: 16, color: Colors.white),
+                        label: const Text('升級權限', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1, color: Colors.black12),
+                  const SizedBox(height: 16),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('系統管理員列表', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: isLoadingList 
+                      ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
+                      : adminList.isEmpty
+                        ? const Center(child: Text('目前無其他系統管理員', style: TextStyle(color: Colors.black38)))
+                        : Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade300),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: ListView.separated(
+                                padding: EdgeInsets.zero,
+                                itemCount: adminList.length,
+                                // 🎯 修正: 避免使用雙底線，改用正確命名的參數
+                                separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black12),
+                                itemBuilder: (context, index) {
+                                  final admin = adminList[index];
+                                  return ListTile(
+                                    tileColor: index.isEven ? Colors.white : Colors.grey.shade50,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                    leading: CircleAvatar(
+                                      backgroundColor: Colors.blueAccent.withValues(alpha: 0.1),
+                                      child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.blueAccent, size: 20),
+                                    ),
+                                    title: Text(admin['email'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                    subtitle: Padding(
+                                      padding: const EdgeInsets.only(top: 4.0),
+                                      child: Text(admin['role'] ?? '系統管理員', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                                    ),
+                                    trailing: TextButton.icon(
+                                      icon: const Icon(Icons.remove_moderator_rounded, size: 16),
+                                      label: const Text('撤銷權限', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.redAccent,
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        backgroundColor: Colors.redAccent.withValues(alpha: 0.1),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      onPressed: isProcessing ? null : () => changeAdminRole(false, targetEmail: admin['email']),
+                                    ),
+                                  );
+                                }
+                              )
+                            )
+                          )
+                  )
                 ],
               ),
             ),
             actions: [
               TextButton(
                 onPressed: isProcessing ? null : () => Navigator.pop(dialogContext),
-                child: const Text('取消', style: TextStyle(color: Colors.grey)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.redAccent,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isProcessing ? Colors.grey : Colors.redAccent)),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  elevation: 0,
-                ),
-                onPressed: isProcessing ? null : () => changeAdminRole(false),
-                child: const Text('撤銷權限', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-                onPressed: isProcessing ? null : () => changeAdminRole(true),
-                child: isProcessing 
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('升級權限', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                child: const Text('關閉', style: TextStyle(color: Colors.grey)),
               ),
             ],
           );
@@ -708,12 +822,84 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     final TextEditingController titleController = TextEditingController();
     final TextEditingController bodyController = TextEditingController();
     bool isSending = false;
+    bool isLoadingList = true;
+    List<Map<String, dynamic>> broadcasts = [];
+    bool isInitialized = false;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
+
+          Future<void> loadBroadcasts() async {
+            setDialogState(() => isLoadingList = true);
+            try {
+              final data = await Supabase.instance.client
+                  .from('system_broadcasts')
+                  .select()
+                  .order('created_at', ascending: false);
+              if (dialogContext.mounted) {
+                setDialogState(() {
+                  broadcasts = List<Map<String, dynamic>>.from(data);
+                  isLoadingList = false;
+                });
+              }
+            } catch (e) {
+              debugPrint('讀取公告失敗: $e');
+              if (dialogContext.mounted) setDialogState(() => isLoadingList = false);
+            }
+          }
+
+          if (!isInitialized) {
+            isInitialized = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              loadBroadcasts();
+            });
+          }
+
+          Future<void> deleteBroadcast(String id) async {
+            final confirm = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: const Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+                    SizedBox(width: 8),
+                    Text('刪除公告確認', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                content: const Text('確定要刪除這筆公告嗎？\n刪除後，所有使用者端將不再顯示此筆公告。', style: TextStyle(height: 1.5)),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(color: Colors.grey))),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, elevation: 0),
+                    onPressed: () => Navigator.pop(context, true), 
+                    child: const Text('確定', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                  ),
+                ]
+              )
+            );
+
+            if (confirm == true) {
+              setDialogState(() => isLoadingList = true);
+              try {
+                await Supabase.instance.client.from('system_broadcasts').delete().eq('id', id);
+                await loadBroadcasts(); 
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ 公告已成功刪除'), backgroundColor: Colors.teal));
+                }
+              } catch (e) {
+                debugPrint('刪除公告失敗: $e');
+                setDialogState(() => isLoadingList = false);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('刪除失敗: $e'), backgroundColor: Colors.redAccent));
+                }
+              }
+            }
+          }
+
           return AlertDialog(
             backgroundColor: Colors.white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -721,84 +907,157 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
               children: [
                 Icon(Icons.campaign_rounded, color: Colors.orange, size: 28),
                 SizedBox(width: 8),
-                Text('發送全域推播', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Text('全域公告', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               ],
             ),
             content: SizedBox(
-              width: 450,
+              width: 550,  
+              height: 600, 
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
                     controller: titleController,
                     decoration: InputDecoration(
                       labelText: '公告標題',
-                      hintText: '例如：系統維護通知',
+                      hintText: '請輸入公告標題',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.orange, width: 2)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: bodyController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: '公告內容',
+                      hintText: '請輸入欲發佈的內容',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.orange, width: 2)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      onPressed: isSending ? null : () async {
+                        final String title = titleController.text.trim();
+                        final String message = bodyController.text.trim();
+
+                        if (title.isEmpty || message.isEmpty) {
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('標題與內容不能為空'), backgroundColor: Colors.redAccent));
+                          return;
+                        }
+
+                        setDialogState(() => isSending = true);
+
+                        try {
+                          await Supabase.instance.client.from('system_broadcasts').insert({
+                            'title': title,
+                            'message': message,
+                          });
+
+                          await Supabase.instance.client.functions.invoke(
+                            'broadcast-notification', 
+                            body: { 'title': title, 'body': message }
+                          );
+                          
+                          await logUserAction('發送全域公告', details: '標題: $title');
+                          
+                          titleController.clear();
+                          bodyController.clear();
+                          await loadBroadcasts();
+
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統公告已成功發佈'), backgroundColor: Colors.teal));
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('公告發送失敗: $e'), backgroundColor: Colors.redAccent));
+                          }
+                        } finally {
+                          if (dialogContext.mounted) setDialogState(() => isSending = false);
+                        }
+                      },
+                      icon: isSending 
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.send_rounded, size: 16, color: Colors.white),
+                      label: const Text('發送', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: bodyController,
-                    maxLines: 5,
-                    decoration: InputDecoration(
-                      labelText: '公告內容',
-                      hintText: '請輸入發送內容',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.orange, width: 2)),
-                    ),
+                  const Divider(height: 1, color: Colors.black12),
+                  const SizedBox(height: 16),
+                  
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('歷史公告列表', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87)),
                   ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: isLoadingList 
+                      ? const Center(child: CircularProgressIndicator(color: Colors.orange))
+                      : broadcasts.isEmpty
+                        ? const Center(child: Text('目前無任何公告紀錄', style: TextStyle(color: Colors.black38)))
+                        : Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade300),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: ListView.separated(
+                                padding: EdgeInsets.zero,
+                                itemCount: broadcasts.length,
+                                separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black12),
+                                itemBuilder: (context, index) {
+                                  final b = broadcasts[index];
+                                  final time = DateTime.parse(b['created_at'].toString()).toLocal();
+                                  final timeStr = "${time.year}/${time.month.toString().padLeft(2,'0')}/${time.day.toString().padLeft(2,'0')} ${time.hour.toString().padLeft(2,'0')}:${time.minute.toString().padLeft(2,'0')}";
+                                  
+                                  return ListTile(
+                                    tileColor: index.isEven ? Colors.white : Colors.grey.shade50,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                    title: Text(b['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                    subtitle: Padding(
+                                      padding: const EdgeInsets.only(top: 4.0),
+                                      child: Text(b['message'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(timeStr, style: const TextStyle(fontSize: 11, color: Colors.black45)),
+                                        const SizedBox(width: 8),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                          onPressed: () => deleteBroadcast(b['id'].toString()),
+                                          tooltip: '刪除此公告',
+                                        )
+                                      ]
+                                    )
+                                  );
+                                }
+                              )
+                            )
+                          )
+                  )
                 ],
               ),
             ),
             actions: [
               TextButton(
-                onPressed: isSending ? null : () => Navigator.pop(dialogContext),
-                child: const Text('取消', style: TextStyle(color: Colors.grey)),
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('關閉', style: TextStyle(color: Colors.grey)),
               ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-                onPressed: isSending ? null : () async {
-                  if (titleController.text.trim().isEmpty || bodyController.text.trim().isEmpty) {
-                    ScaffoldMessenger.of(context).clearSnackBars();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('標題與內容不能為空'), backgroundColor: Colors.redAccent));
-                    return;
-                  }
-
-                  setDialogState(() => isSending = true);
-
-                  try {
-                    await Supabase.instance.client.functions.invoke(
-                      'broadcast-notification', 
-                      body: {
-                        'title': titleController.text.trim(),
-                        'body': bodyController.text.trim(),
-                      }
-                    );
-                    
-                    if (!dialogContext.mounted || !mounted) return;
-                    Navigator.pop(dialogContext); 
-                    
-                    ScaffoldMessenger.of(context).clearSnackBars();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統公告已成功推播至所有裝置！'), backgroundColor: Colors.teal));
-                  } catch (e) {
-                    if (dialogContext.mounted) setDialogState(() => isSending = false);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('推播發送失敗: $e'), backgroundColor: Colors.redAccent));
-                    }
-                  }
-                },
-                child: isSending 
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('確認發送', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              )
             ],
           );
         }
@@ -938,7 +1197,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                         .eq('sn', targetSn)
                         .maybeSingle();
 
-                    if (!dialogContext.mounted || !mounted) return; 
+                    if (!dialogContext.mounted || !context.mounted) return; 
 
                     if (deviceData == null) {
                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('查無此設備序號，請重新確認'), backgroundColor: Colors.redAccent));
@@ -956,14 +1215,14 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                       },
                     );
 
-                    if (!dialogContext.mounted || !mounted) return; 
+                    if (!dialogContext.mounted || !context.mounted) return; 
 
                     if (response['success'] == true) {
                       await logUserAction(
                         '強制移轉設備', 
                         details: '將設備 (SN: $targetSn) 強制移轉給 $targetEmail'
                       );
-                      if (!dialogContext.mounted || !mounted) return;
+                      if (!dialogContext.mounted || !context.mounted) return;
                       Navigator.pop(dialogContext);
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(response['message'] ?? '設備移轉成功！'), backgroundColor: Colors.teal));
                     } else {
@@ -971,7 +1230,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                       setDialogState(() => isProcessing = false);
                     }
                   } catch (e) {
-                    if (dialogContext.mounted && mounted) {
+                    if (dialogContext.mounted && context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('發生錯誤: $e'), backgroundColor: Colors.redAccent));
                       setDialogState(() => isProcessing = false);
                     }
@@ -988,9 +1247,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     );
   }
 
-  // --------------------------------------------------------------------------
-  // 以下為「所有人皆可使用」，但「嚴格驗證擁有權」的功能對話框
-  // --------------------------------------------------------------------------
   void _showExportLogsDialog() {
     DateTime startDate = DateTime.now().subtract(const Duration(days: 7));
     DateTime endDate = DateTime.now();
@@ -1286,7 +1542,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                     mergeData(testData);
                     mergeData(invPsData);
 
-                    if (!dialogContext.mounted || !mounted) return;
+                    if (!dialogContext.mounted || !context.mounted) return;
 
                     if (combined.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('該區間無任何運作紀錄'), backgroundColor: Colors.orange));
@@ -1356,7 +1612,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                       }
                     }
 
-                    if (!dialogContext.mounted || !mounted) return;
+                    if (!dialogContext.mounted || !context.mounted) return;
                     Navigator.pop(dialogContext);
 
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1366,7 +1622,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                     ));
 
                   } catch (e) {
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗: $e'), backgroundColor: Colors.redAccent));
                     }
                   } finally {
@@ -1395,9 +1651,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   }
 }
 
-// --------------------------------------------------------------------------
-// 獨立元件：遠端偵錯
-// --------------------------------------------------------------------------
 class RemoteDiagnosticsDialog extends StatefulWidget {
   final bool isAdmin; 
   const RemoteDiagnosticsDialog({super.key, required this.isAdmin});

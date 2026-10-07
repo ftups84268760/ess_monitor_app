@@ -6,7 +6,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 class RawDataScreen extends StatefulWidget {
   final String deviceDbId;
-  const RawDataScreen({super.key, required this.deviceDbId});
+  final String inverterSn; 
+  const RawDataScreen({super.key, required this.deviceDbId, required this.inverterSn});
 
   @override
   State<RawDataScreen> createState() => _RawDataScreenState();
@@ -45,7 +46,7 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
 
   void _startTimer() {
     _liveTimer?.cancel();
-    _liveTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLatestTelemetry(isSilent: true));
+    _liveTimer = Timer.periodic(const Duration(seconds: 60), (_) => _fetchLatestTelemetry(isSilent: true));
   }
 
   @override
@@ -73,22 +74,12 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
     if (!isSilent) setState(() => _isLoading = true);
 
     try {
-      if (widget.deviceDbId.isEmpty) return;
-
-      final devRes = await Supabase.instance.client
-          .from('devices')
-          .select('sn')
-          .eq('id', widget.deviceDbId)
-          .maybeSingle();
-
-      if (devRes == null) return;
-      final String sn = (devRes['sn'] ?? '').toString();
-
+      final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
 
       final List<dynamic> list = await Supabase.instance.client
           .from('telemetry_test')
-          .select()
+          .select('pv1_voltage, pv1_current, pv2_voltage, pv2_current, ac_in_v_r, ac_in_v_s, ac_in_freq, battery_capacity, battery_voltage, battery_current, ac_out_v_r, ac_out_v_s, ac_out_freq, inner_temp, comp_max_temp')
           .eq('device_id', sn)
           .order('created_at', ascending: false)
           .limit(1);
@@ -122,7 +113,7 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => HistoryDataModal(deviceDbId: widget.deviceDbId),
+      builder: (context) => HistoryDataModal(deviceDbId: widget.deviceDbId, inverterSn: widget.inverterSn),
     );
   }
 
@@ -289,7 +280,8 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
 
 class HistoryDataModal extends StatefulWidget {
   final String deviceDbId;
-  const HistoryDataModal({super.key, required this.deviceDbId});
+  final String inverterSn;
+  const HistoryDataModal({super.key, required this.deviceDbId, required this.inverterSn});
 
   @override
   State<HistoryDataModal> createState() => _HistoryDataModalState();
@@ -320,16 +312,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
     setState(() => _isLoadingList = true);
 
     try {
-      if (widget.deviceDbId.isEmpty) return;
-
-      final devRes = await Supabase.instance.client
-          .from('devices')
-          .select('sn')
-          .eq('id', widget.deviceDbId)
-          .maybeSingle();
-
-      if (devRes == null) return;
-      final String sn = (devRes['sn'] ?? '').toString();
+      final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
 
       if (_earliestDataDate == null) {
@@ -364,7 +347,7 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
 
       final List<dynamic> response = await Supabase.instance.client
           .from('telemetry_test')
-          .select()
+          .select('created_at, pv1_voltage, pv1_current, pv2_voltage, pv2_current, ac_in_v_r, ac_in_v_s, ac_in_freq, battery_capacity, battery_voltage, battery_current, ac_out_v_r, ac_out_v_s, ac_out_freq, inner_temp, comp_max_temp')
           .eq('device_id', sn)
           .gte('created_at', dayStart)
           .lte('created_at', dayEnd)
@@ -746,7 +729,8 @@ class _HistoryDataModalState extends State<HistoryDataModal> {
 
 class AlarmListScreen extends StatefulWidget {
   final String deviceDbId;
-  const AlarmListScreen({super.key, required this.deviceDbId});
+  final String inverterSn; 
+  const AlarmListScreen({super.key, required this.deviceDbId, required this.inverterSn});
 
   @override
   State<AlarmListScreen> createState() => _AlarmListScreenState();
@@ -761,10 +745,11 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
   late TabController _tabController; 
   Timer? _alarmTimer;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  RealtimeChannel? _alarmChannel; // 🎯 新增：監聽告警資料表的 Realtime 頻道
+  
   bool _isOnline = true;
   bool _isFetching = false;
 
-  // 🎯 取得正在處理中的錯誤數量
   int get _activeFaultCount => _faultList.where((f) => f['is_active'] == true).length;
 
   @override
@@ -772,7 +757,9 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addObserver(this); 
+    
     _fetchAlarmsFromSupabase();
+    _setupRealtimeSubscription(); // 🎯 新增：初始化 Realtime 監聽
     _startTimer();
 
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
@@ -788,9 +775,30 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     });
   }
 
+  // 🎯 新增：監聽特定設備告警資料的新增、修改與刪除
+  void _setupRealtimeSubscription() {
+    final String sn = widget.inverterSn;
+    if (sn.isEmpty) return;
+
+    _alarmChannel = Supabase.instance.client.channel('public:device_alarms:device_id=eq.$sn');
+    _alarmChannel!.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'device_alarms',
+      filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'device_id', value: sn),
+      callback: (payload) {
+        if (mounted) {
+          // 收到更新通知時，以靜默模式(isSilent: true)刷新資料，不干擾使用者操作
+          _fetchAlarmsFromSupabase(isSilent: true);
+        }
+      },
+    ).subscribe();
+  }
+
   void _startTimer() {
     _alarmTimer?.cancel();
-    _alarmTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchAlarmsFromSupabase(isSilent: true));
+    // 保留 60 秒的背景輪詢作為備用安全機制
+    _alarmTimer = Timer.periodic(const Duration(seconds: 60), (_) => _fetchAlarmsFromSupabase(isSilent: true));
   }
 
   @override
@@ -807,6 +815,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this); 
     _connectivitySubscription?.cancel();
+    _alarmChannel?.unsubscribe(); // 🎯 確保退出畫面時釋放連線
     _alarmTimer?.cancel();
     _tabController.dispose();
     super.dispose();
@@ -839,16 +848,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
     if (!isSilent) setState(() => _isLoading = true);
 
     try {
-      if (widget.deviceDbId.isEmpty) return;
-
-      final devRes = await Supabase.instance.client
-          .from('devices')
-          .select('sn')
-          .eq('id', widget.deviceDbId)
-          .maybeSingle();
-
-      if (devRes == null) return;
-      final String sn = (devRes['sn'] ?? '').toString();
+      final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
 
       final List<dynamic> alarmLogs = await Supabase.instance.client
@@ -886,7 +886,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
       }
     } catch (e) {
       debugPrint('取得告警清單失敗: $e');
-      if (mounted) {
+      if (mounted && !isSilent) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('讀取失敗: ${e.toString()}'), 
@@ -1081,7 +1081,6 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
             labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
             tabs: [ 
               const Tab(text: '告警'), 
-              // 🎯 動態標籤：當有錯誤時顯示紅色標記數量
               Tab(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,

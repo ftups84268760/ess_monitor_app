@@ -31,6 +31,7 @@
                 android:layout_height="50dp"
                 android:src="@drawable/ic_battery_track" />
 
+            <!-- 電池液體填充 (搭配 Kotlin 的 LevelListDrawable 控制高度/寬度) -->
             <ImageView
                 android:id="@+id/img_battery_fill"
                 android:layout_width="50dp"
@@ -73,6 +74,7 @@
                 android:layout_marginBottom="4dp">
 
                 <TextView
+                    android:id="@+id/tv_status_label"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
@@ -93,7 +95,7 @@
                     android:textStyle="bold" />
             </RelativeLayout>
 
-            <!-- 🎯 新增的水平漸層進度條 -->
+            <!-- 水平漸層進度條 -->
             <ProgressBar
                 android:id="@+id/pb_soc"
                 style="@android:style/Widget.ProgressBar.Horizontal"
@@ -102,6 +104,20 @@
                 android:max="100"
                 android:progress="0"
                 android:progressDrawable="@drawable/progress_battery" />
+
+            <!-- 🎯 優化後：使用 Compound Drawable 合併圖文，提升渲染效能 -->
+            <TextView
+                android:id="@+id/tv_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="剛剛"
+                android:textColor="#888888"
+                android:textSize="11sp"
+                android:gravity="center_vertical"
+                android:drawableStart="@drawable/ic_widget_update"
+                android:drawablePadding="4dp" />
+
         </LinearLayout>
     </RelativeLayout>
 </RelativeLayout>

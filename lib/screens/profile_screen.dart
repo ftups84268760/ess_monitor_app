@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'settings_screens.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'advanced_settings_screens.dart';
 
 // 🎯 引入 Logger
 import '../utils/audit_logger.dart';

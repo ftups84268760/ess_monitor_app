@@ -58,7 +58,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
 
   void _startTimer() {
     _realtimeRefreshTimer?.cancel();
-    // 🎯 效能優化 1：將高耗能的圖表與統計資料輪詢，從 3 秒降頻至 60 秒
     _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
       _fetchRealtimeLatestAndHistoryData(isSilent: true);
     });
@@ -113,9 +112,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       final dayStart = "${dateFormatted}T00:00:00.000Z";
       final dayEnd = "${dateFormatted}T23:59:59.999Z";
 
-      // 🎯 效能優化 2：針對最新資料，精準選取會用到的欄位
       final latestTest = await Supabase.instance.client.from('telemetry_test')
-          .select('battery_capacity, battery_voltage, battery_current, ac_out_v_r, ac_out_v_s, ac_out_freq, ac_in_v_r, ac_in_v_s, ac_in_freq, created_at')
+          .select('battery_capacity, battery_voltage, battery_current, ac_out_v_r, ac_out_v_s, ac_in_v_r, ac_in_v_s, ac_in_freq, ac_out_freq, created_at')
           .eq('device_id', sn).order('created_at', ascending: false).limit(1);
           
       final latestInvPs = await Supabase.instance.client.from('telemetry_inv_ps')
@@ -126,9 +124,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
           .select('today_load_kwh, today_grid_kwh, today_charge_kwh, today_discharge_kwh')
           .eq('device_id', sn).eq('date', dateFormatted).limit(1);
       
-      // 🎯 效能優化 3：圖表需要撈取高達 1000 筆資料，務必嚴格限制欄位，避免 Egress 流量爆表
+      // 🎯 修正：將 inner_temperature 修正為 inner_temp，並補上 battery_voltage
       final historyTest = await Supabase.instance.client.from('telemetry_test')
-          .select('battery_capacity, battery_current, ac_out_v_r, ac_out_v_s, ac_in_v_r, ac_in_v_s, inner_temperature, created_at')
+          .select('battery_capacity, battery_voltage, battery_current, ac_out_v_r, ac_out_v_s, ac_in_v_r, ac_in_v_s, ac_in_freq, ac_out_freq, inner_temp, created_at')
           .eq('device_id', sn).gte('created_at', dayStart).lte('created_at', dayEnd).order('created_at', ascending: true).limit(1000);
           
       final historyInvPs = await Supabase.instance.client.from('telemetry_inv_ps')
@@ -269,7 +267,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
     if (nextDateOnly.isAfter(today)) isNextDisabled = true;
 
     double screenHeight = MediaQuery.of(context).size.height;
-    double dynamicChartHeight = (screenHeight * 0.35).clamp(300.0, 600.0);
+    // 🎯 將螢幕高度佔比從 35% 提升到 45%，並將圖表最低高度從 300 提升到 380
+    double dynamicChartHeight = (screenHeight * 0.45).clamp(380.0, 600.0);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
@@ -378,8 +377,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       child: Column(
         children: [
           Container(
-            margin: const EdgeInsets.only(bottom: 20),
-            padding: const EdgeInsets.all(20),
+            margin: const EdgeInsets.only(bottom: 16), // 🎯 稍微縮減與下方卡片的間距
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), // 🎯 大幅縮減上下的留白高度
             decoration: BoxDecoration(
               color: Colors.white, 
               borderRadius: BorderRadius.circular(16), 
@@ -398,24 +397,24 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('自我供電', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Text('${selfConsumptionRatio.toStringAsFixed(1)} %', style: const TextStyle(color: Colors.teal, fontSize: 28, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 4), // 🎯 縮小文字間距
+                    Text('${selfConsumptionRatio.toStringAsFixed(1)} %', style: const TextStyle(color: Colors.teal, fontSize: 24, fontWeight: FontWeight.w800)), // 🎯 數值字體微調(28->24)
+                    const SizedBox(height: 2), // 🎯 縮小文字間距
                     Text('計算公式: [1-(電網/負載)] *100%', style: TextStyle(color: Colors.grey[400], fontSize: 8)),
                   ],
                 ),
                 SizedBox(
-                  width: 80, height: 80,
+                  width: 60, height: 60, // 🎯 縮小圓環進度條整體尺寸 (80->60)
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
                       CircularProgressIndicator(
                         value: selfConsumptionRatio / 100,
-                        strokeWidth: 10,
+                        strokeWidth: 8, // 🎯 圓環厚度微調變細 (10->8)
                         backgroundColor: Colors.grey[100],
                         valueColor: const AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
                       ),
-                      Center(child: Icon(Icons.flash_on_rounded, color: Colors.orangeAccent.withValues(alpha: 0.5), size: 32)),
+                      Center(child: Icon(Icons.flash_on_rounded, color: Colors.orangeAccent.withValues(alpha: 0.5), size: 24)), // 🎯 內部雷電圖示縮小 (32->24)
                     ],
                   ),
                 ),
@@ -447,7 +446,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
             MapEntry(const Color(0xFFF59E0B), '太陽能 (W)'),
             MapEntry(const Color(0xFFFF5252), '電網 (W)'),
             MapEntry(const Color(0xFF10B981), '電池 (W)'),
-            MapEntry(const Color(0xFFFBBF24), '內部溫度 (°C)'), 
+            MapEntry(const Color(0xFF424242), '內部溫度 (°C)'), 
           ], chartHeight: chartHeight), 
           const SizedBox(height: 24), 
         ],

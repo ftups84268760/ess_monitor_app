@@ -16,6 +16,46 @@ import 'package:flutter/foundation.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart'; 
+import 'package:home_widget/home_widget.dart';
+import 'widgets/web_session_timeout_listener.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // 🎯 修正 1：必須傳入 options，否則 Android 背景 Isolate 會直接閃退崩潰
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  ); 
+
+  if (message.data['type'] == 'widget_sync') {
+    try {
+      final int soc = int.tryParse(message.data['soc']?.toString() ?? '0') ?? 0;
+      final bool isCharging = (message.data['is_charging']?.toString() == 'true');
+      final String deviceName = message.data['device_name']?.toString() ?? '未知設備';
+      final double updateTime = double.tryParse(message.data['update_time']?.toString() ?? '') 
+          ?? (DateTime.now().millisecondsSinceEpoch / 1000.0);
+
+      // 🎯 修正 2：App Group 僅限 iOS，避免 Android 資料庫被寫入錯誤的檔案
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        const String appGroupId = 'group.com.flighttechnic.ftess';
+        await HomeWidget.setAppGroupId(appGroupId);
+      }
+
+      await HomeWidget.saveWidgetData<int>('battery_soc', soc);
+      await HomeWidget.saveWidgetData<bool>('is_charging', isCharging);
+      await HomeWidget.saveWidgetData<String>('device_name', deviceName);
+      await HomeWidget.saveWidgetData<double>('last_update_timestamp', updateTime);
+
+      await HomeWidget.updateWidget(
+        iOSName: 'EssBatteryWidget', 
+        androidName: 'EssBatteryWidgetProvider', 
+      );
+
+      debugPrint('✅ [靜默推播攔截] Widget 已成功在背景更新: $soc%, 充電中: $isCharging');
+    } catch (e) {
+      debugPrint('❌ [靜默推播攔截失敗]: $e');
+    }
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,18 +64,21 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
   try {
+    // 🎯 修正 3：移除 .timeout(5s)。Supabase 初始化僅需讀取本地 Disk，不應受網路或背景喚醒延遲影響
     await Supabase.initialize(
       url: supabaseUrl, 
       publishableKey: supabaseAnonKey,
-    ).timeout(const Duration(seconds: 5));
+    );
   } catch (e) {
-    debugPrint('Supabase 初始化超時或無網路連線: $e');
+    debugPrint('Supabase 初始化失敗: $e');
   }
 
   await NotificationService.init();
@@ -89,7 +132,6 @@ class _RootScreenState extends State<RootScreen> {
               .from('profiles')
               .update({'fcm_token': fcmToken})
               .eq('id', userId);
-          debugPrint('✅ FCM Token 註冊並上傳成功: $fcmToken');
         }
 
         FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
@@ -99,11 +141,8 @@ class _RootScreenState extends State<RootScreen> {
                 .from('profiles')
                 .update({'fcm_token': newToken})
                 .eq('id', currentUserId);
-            debugPrint('🔄 FCM Token 已自動刷新並更新至資料庫');
           }
         });
-      } else {
-        debugPrint('⚠️ 使用者拒絕了推播通知權限');
       }
     } catch (e) {
       debugPrint('❌ 設定 FCM Token 發生錯誤: $e');
@@ -114,7 +153,6 @@ class _RootScreenState extends State<RootScreen> {
     if (!kIsWeb) {
       await Future.delayed(const Duration(milliseconds: 2200));
     } else {
-      // 🎯 給予網頁版 1.2 秒的延遲，用來完美展示 0~100% 動態進度條
       await Future.delayed(const Duration(milliseconds: 1200));
     }
 
@@ -134,13 +172,11 @@ class _RootScreenState extends State<RootScreen> {
           final String userRole = userData?['role'] ?? '';
 
           if (userRole != '系統管理員(root)') {
-            debugPrint('⚠️ 權限不足：非 root 管理員嘗試登入網頁版');
             await Supabase.instance.client.auth.signOut();
             await prefs.setBool('auto_login', false);
             session = null; 
           }
         } catch (e) {
-          debugPrint('讀取權限失敗，基於安全考量強制登出: $e');
           await Supabase.instance.client.auth.signOut();
           session = null;
         }
@@ -167,7 +203,6 @@ class _RootScreenState extends State<RootScreen> {
         }
       } else {
         if (autoLogin && session == null) {
-          debugPrint('⚠️ 偵測到 Session 逾時登出或權限不足，強制銷毀本地推播 Token');
           if (!kIsWeb) {
             try { await FirebaseMessaging.instance.deleteToken(); } catch (_) {}
           }
@@ -201,7 +236,6 @@ class _RootScreenState extends State<RootScreen> {
   @override
   Widget build(BuildContext context) {
     if (_showSplash) {
-      // 🎯 分流：網頁版顯示進度條，手機版顯示背景圖
       if (kIsWeb) {
         return Scaffold(
           backgroundColor: const Color(0xFF0F172A),
@@ -219,7 +253,7 @@ class _RootScreenState extends State<RootScreen> {
                   width: 300,
                   child: TweenAnimationBuilder<double>(
                     tween: Tween<double>(begin: 0.0, end: 1.0),
-                    duration: const Duration(milliseconds: 1200), // 配合延遲時間
+                    duration: const Duration(milliseconds: 1200),
                     builder: (context, value, _) {
                       return Column(
                         children: [
@@ -274,21 +308,49 @@ class _RootScreenState extends State<RootScreen> {
     }
 
     if (_isLoggedIn) {
-      return ResponsiveLayout(
-        mobileApp: MainNavigationScreen(onLogout: () async {
+      // 🎯 用我們剛寫好的監聽器包覆整個已登入的畫面
+      return WebSessionTimeoutListener(
+        duration: const Duration(minutes: 5),
+        onTimeout: () async {
+          // 1. 先執行非同步任務
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('auto_login', false);
-          
-          await FirebaseMessaging.instance.deleteToken();
           await Supabase.instance.client.auth.signOut();
           
+          // 2. 判斷 State 是否還活著，來更新狀態
+          if (!mounted) return;
           setState(() {
             _isLoggedIn = false;
           });
-        }),
-        webAdmin: const WebAdminScreen(), 
+
+          // 3. 🎯 關鍵修正：判斷 Context 是否還活著，再來顯示 SnackBar
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('您已閒置超過一段時間，系統已自動登出'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        },
+        child: ResponsiveLayout(
+          mobileApp: MainNavigationScreen(onLogout: () async {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('auto_login', false);
+            
+            if (!kIsWeb) {
+              try { await FirebaseMessaging.instance.deleteToken(); } catch (_) {}
+            }
+            await Supabase.instance.client.auth.signOut();
+            
+            setState(() {
+              _isLoggedIn = false;
+            });
+          }),
+          webAdmin: const WebAdminScreen(), 
+        ),
       );
-    } else {
+    }
+    else {
       return LoginScreen(onLoginSuccess: () {
         _setupAndUploadFcmToken();
         

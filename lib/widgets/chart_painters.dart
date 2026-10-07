@@ -315,14 +315,17 @@ class DualAxisPowerChartPainter extends CustomPainter {
       }
       
       double maxKwVal = maxW / 1000.0;
-      if (maxKwVal <= 1.0) { computedMaxKw = 1.0; } 
-      else if (maxKwVal <= 2.0) { computedMaxKw = 2.0; } 
-      else if (maxKwVal <= 3.0) { computedMaxKw = 3.0; } 
-      else if (maxKwVal <= 4.0) { computedMaxKw = 4.0; } 
-      else if (maxKwVal <= 6.0) { computedMaxKw = 6.0; } 
-      else if (maxKwVal <= 8.0) { computedMaxKw = 8.0; } 
-      else if (maxKwVal <= 10.0) { computedMaxKw = 10.0; } 
-      else { computedMaxKw = (maxKwVal.ceilToDouble() + 2.0); }
+      
+      // 🎯 動態邊界邏輯：
+      // 如果最大值很小 (低於 1kW)，就以 0.5kW 為一個級距來抓取上限，避免圖表太空曠
+      // 如果最大值超過 1kW，則直接無條件進位到下一個整數 kW (例如 2.4kW -> 3.0kW)
+      if (maxKwVal <= 0.0) {
+        computedMaxKw = 1.0; // 預設最小邊界
+      } else if (maxKwVal < 1.0) {
+        computedMaxKw = (maxKwVal * 2).ceil() / 2.0; 
+      } else {
+        computedMaxKw = maxKwVal.ceilToDouble(); 
+      }
 
       if (maxTemp != -100.0 && minTemp != 100.0) {
         computedMaxTemp = ((maxTemp / 10.0).ceil() * 10.0).clamp(-30.0, 100.0);
@@ -521,7 +524,7 @@ class DualAxisPowerChartPainter extends CustomPainter {
       _drawSmoothCurve(canvas, line3Points, const Color(0xFFFF5252), midY); 
       _drawSmoothCurve(canvas, line4Points, const Color(0xFF10B981), midY); 
       
-      _drawSmoothCurve(canvas, line5Points, const Color(0xFFFDE047), bottomY, isDashed: true, showFill: false); 
+      _drawSmoothCurve(canvas, line5Points, const Color(0xFF424242), bottomY, isDashed: true, showFill: false); 
     }
 
     if (touchPosition != null) {
@@ -622,7 +625,7 @@ class DualAxisPowerChartPainter extends CustomPainter {
             _drawText(canvas, '負載: ${load.toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 42), const Color(0xFF3B82F6), 10);
             _drawText(canvas, '太陽能: ${(s1+s2).toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 58), const Color(0xFFF59E0B), 10);
             _drawText(canvas, '電池: ${batP.toStringAsFixed(0)} W', Offset(tooltipX + 10, tooltipY + 74), const Color(0xFF10B981), 10);
-            _drawText(canvas, '內部溫度: ${tempVal.toStringAsFixed(1)} °C', Offset(tooltipX + 10, tooltipY + 90), const Color(0xFFFDE047), 10); 
+            _drawText(canvas, '內部溫度: ${tempVal.toStringAsFixed(1)} °C', Offset(tooltipX + 10, tooltipY + 90), const Color(0xFF424242), 10);
           }
         }
       }
@@ -631,13 +634,13 @@ class DualAxisPowerChartPainter extends CustomPainter {
 
   void _drawSmoothCurve(Canvas canvas, List<Offset> points, Color color, double baselineY, {bool isDashed = false, bool showFill = true}) {
     if (points.isEmpty) return;
+
+    // 🎯 徹底移除「移動平均 (Moving Average)」演算法
+    // 直接使用原始的 points 進行精準連線，確保任何瞬間的尖峰(如 12kW)都能 100% 頂到對應的刻度線
     Path path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (int i = 0; i < points.length - 1; i++) {
-      double xc = (points[i].dx + points[i + 1].dx) / 2;
-      double yc = (points[i].dy + points[i + 1].dy) / 2;
-      path.quadraticBezierTo(points[i].dx, points[i].dy, xc, yc);
+    for (int i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx, points[i].dy);
     }
-    path.lineTo(points.last.dx, points.last.dy);
 
     if (showFill) {
       Path fillPath = Path.from(path);
@@ -645,7 +648,6 @@ class DualAxisPowerChartPainter extends CustomPainter {
       fillPath.lineTo(points.first.dx, baselineY);
       fillPath.close();
 
-      // 🎯 修改點 3：加入垂直線性漸層 (Shader) 取代單一顏色
       final Rect bounds = fillPath.getBounds();
       Paint fillPaint = Paint()
         ..style = PaintingStyle.fill
@@ -653,8 +655,8 @@ class DualAxisPowerChartPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            color.withValues(alpha: 0.35), // 上方顏色較濃
-            color.withValues(alpha: 0.05), // 下方接近透明/白色
+            color.withValues(alpha: 0.35), 
+            color.withValues(alpha: 0.05), 
           ],
           stops: const [0.0, 1.0],
         ).createShader(bounds);
@@ -662,7 +664,12 @@ class DualAxisPowerChartPainter extends CustomPainter {
       canvas.drawPath(fillPath, fillPaint);
     }
 
-    Paint strokePaint = Paint()..color = color..strokeWidth = 1.5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
+    Paint strokePaint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round; // 保留圓角接合，讓直線轉折處不刺眼
     
     if (isDashed) {
       canvas.drawPath(dashPath(path, dashArray: CircularIntervalList<double>([4.0, 4.0])), strokePaint);

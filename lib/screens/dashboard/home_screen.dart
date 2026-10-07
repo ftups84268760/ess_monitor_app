@@ -11,6 +11,7 @@ import 'package:home_widget/home_widget.dart';
 import '../../core/constants.dart';
 import '../../widgets/chart_painters.dart';
 import '../settings_screens.dart';
+import '../device_info_settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String timeString; 
@@ -64,6 +65,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   List<Map<String, dynamic>> _savingsData = [];
   double _todayTotalSavings = 0.0;
 
+  // 🎯 新增：電池清單狀態
+  List<Map<String, dynamic>> _batteries = [];
+  bool _isLoadingBatteries = true;
+
   bool _isFetchingTelemetry = false;
   bool _isOnline = true;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
@@ -86,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   late AnimationController _energyAnimationController;
   Timer? _autoWeatherRefreshTimer;
   Timer? _telemetryTimer; 
-  Timer? _savingsTimer; // 🎯 新增：獨立的電費收益更新計時器
+  Timer? _savingsTimer; 
   
   RealtimeChannel? _psChannel;
   RealtimeChannel? _testChannel;
@@ -129,6 +134,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
     _fetchRealLocationAndWeather();
     _fetchInitialTelemetryData();
+    _fetchBatteries(); // 🎯 初始化時載入電池清單
     _setupRealtimeSubscription();
     _fetchTelemetryDataFromSupabase();
 
@@ -142,9 +148,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     _savingsTimer?.cancel();
     
     _autoWeatherRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchRealLocationAndWeather());
-    // 🎯 優化 1：降頻，將常規輪詢從 5 秒延長到 60 秒，僅做 WebSocket 漏接時的保底機制
     _telemetryTimer = Timer.periodic(const Duration(seconds: 180), (_) => _fetchTelemetryDataFromSupabase());
-    // 🎯 優化 2：電費收益 RPC 計算不需要高頻執行，獨立設定為 5 分鐘一次
     _savingsTimer = Timer.periodic(const Duration(minutes: 5), (_) => _fetchSavingsData());
   }
 
@@ -176,6 +180,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     if (state == AppLifecycleState.resumed) {
       _fetchRealLocationAndWeather();
       _fetchTelemetryDataFromSupabase();
+      _fetchBatteries(); // 🎯 回到前景時刷新電池狀態
       _startTimers(); 
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _stopTimers();  
@@ -191,6 +196,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     _testChannel?.unsubscribe();
     _energyAnimationController.dispose();
     super.dispose();
+  }
+
+  // 🎯 新增：撈取電池清單資料
+  Future<void> _fetchBatteries() async {
+    if (widget.inverterSn.isEmpty) return;
+    if (mounted) setState(() => _isLoadingBatteries = true);
+    try {
+      final batData = await Supabase.instance.client
+          .from('device_bat')
+          .select('*')
+          .eq('device_id', widget.inverterSn) 
+          .order('created_at', ascending: true);
+          
+      if (mounted) {
+        setState(() {
+          _batteries = List<Map<String, dynamic>>.from(batData);
+          _isLoadingBatteries = false;
+        });
+      }
+    } catch(e) {
+      debugPrint('首頁讀取電池失敗: $e');
+      if (mounted) setState(() => _isLoadingBatteries = false);
+    }
   }
 
   Future<void> _checkAndShowFirstTimeSetup() async {
@@ -261,7 +289,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           _customTariffRate = double.tryParse((data['custom_tariff_rate'] ?? 3.5).toString()) ?? 3.5;
           _touSettings = data['tou_settings'];
         });
-        // 只在初次載入或天氣更新時抓取收益，不再每秒亂扣
         _fetchSavingsData();
       }
 
@@ -339,7 +366,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _fetchSavingsData() async {
     if (widget.deviceDbId.isEmpty) return;
     try {
-      // 🎯 優化 3：移除無效的 Select 查詢。不需要查 devices 表拿 sn，直接用 widget 傳進來的 inverterSn
       final String sn = widget.inverterSn;
       
       final now = DateTime.now();
@@ -366,11 +392,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _fetchInitialTelemetryData() async {
     try {
       if (widget.deviceDbId.isEmpty) return;
-      // 🎯 優化 3：移除 devices 表查詢，直接用 widget 變數
       final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
 
-      // 🎯 優化 4：加上嚴格的 select，不再拉取無用欄位，節省 70% 頻寬
       final invPsRes = await Supabase.instance.client.from('telemetry_inv_ps')
           .select('solar1_input_power, solar2_input_power, ac_in_total_active_power, ac_out_total_active_power, battery_power_direction, created_at')
           .eq('device_id', sn).order('created_at', ascending: false).limit(1);
@@ -410,7 +434,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   Future<void> _setupRealtimeSubscription() async {
     if (widget.deviceDbId.isEmpty) return;
-    // 🎯 優化 3：移除 devices 表查詢
     final String sn = widget.inverterSn;
     if (sn.isEmpty) return;
 
@@ -435,8 +458,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     loadPower = double.tryParse((data['ac_out_total_active_power'] ?? 0).toString());
     batteryPowerDir = int.tryParse((data['battery_power_direction'] ?? 0).toString()) ?? 0;
     if (data['created_at'] != null) _lastUpdateTime = _formatTimestamp(data['created_at'].toString());
-    
-    // 🎯 效能重構：刪除原本在這裡呼叫的 _fetchSavingsData(); 避免每次 WebSocket 推送都狂打 RPC，改交由 _savingsTimer 定時處理。
   }
 
   void _updateTestData(Map<String, dynamic> data) {
@@ -478,13 +499,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
     try {
       if (widget.deviceDbId.isEmpty) return;
-      // 只需要查備援模式即可，不拿其他資料
       final devRes = await Supabase.instance.client.from('devices').select('is_storm_backup_mode').eq('id', widget.deviceDbId).maybeSingle();
       if (devRes == null) return;
       final String sn = widget.inverterSn;
       if (sn.isEmpty) return;
       
-      // 🎯 優化 4：加上嚴格的 select，節省頻寬
       final invPsRes = await Supabase.instance.client.from('telemetry_inv_ps')
           .select('solar1_input_power, solar2_input_power, ac_in_total_active_power, ac_out_total_active_power, battery_power_direction, created_at')
           .eq('device_id', sn).order('created_at', ascending: false).limit(1);
@@ -534,9 +553,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           } else { batterySoc = null; }
         });
       }
-      
-      // 🎯 效能重構：刪除原本這裡呼叫的 _fetchSavingsData(); 避免重複執行。
-      
     } catch (e) {
       if (mounted) setState(() { pvPower = null; gridPower = null; loadPower = null; todaySolar = null; todayLoad = null; batterySoc = null; });
     } finally {
@@ -547,7 +563,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _restoreTouMode() async {
     if (widget.deviceDbId.isEmpty) return;
     try {
-      // 🎯 優化 3：替換 devData，直接用變數
       final String sn = widget.inverterSn;
       final settings = _touSettings ?? {};
       final bool isSeason = settings['isSeasonModeEnabled'] ?? false;
@@ -938,6 +953,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     );
   }
 
+  // 🎯 新增：網頁版右側邊欄專用的電池模組列表
+  Widget _buildSidebarBatteryList() {
+    if (_isLoadingBatteries) {
+      return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator(color: Colors.teal)));
+    }
+    if (_batteries.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
+        child: const Center(child: Text('目前尚未綁定任何電池模組', style: TextStyle(color: Colors.black38, fontSize: 12)))
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24)
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: _batteries.length,
+        separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black12),
+        itemBuilder: (context, index) {
+          final bat = _batteries[index];
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            leading: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white, 
+                borderRadius: BorderRadius.circular(8), 
+                border: Border.all(color: Colors.black12), 
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/bat_icon.png', 
+                  fit: BoxFit.contain, 
+                ),
+              ),
+            ),
+            title: const Text('FT-IFS-B05', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            subtitle: Text('SN: ${bat['bat_sn']}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildStormBackupBanner() {
     if (!_isStormBackupMode) return const SizedBox.shrink();
 
@@ -1084,6 +1154,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                                   builder: (context) => DeviceInfoSettingsScreen(
                                     deviceDbId: widget.deviceDbId,
                                     isRootOrOwner: isRootOrOwner,
+                                    accountType: widget.accountType, 
                                   )
                                 ),
                               );
@@ -1249,7 +1320,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                         child: BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                           child: Container(
-                            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+                            // 🎯 加大側邊欄高度，確保能完整容納電池模組列表
+                            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.5),
@@ -1318,7 +1390,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                                         return _buildTouSettingsContent(isEffectivelyBackup, isSeason, startM, endM);
                                       }
                                     ),
-                                  ]
+                                  ],
+                                  
+                                  // 🎯 網頁版側邊欄新增電池模組列表
+                                  const Divider(height: 32, color: Colors.black12),
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.battery_charging_full_rounded, color: Colors.teal, size: 18),
+                                      SizedBox(width: 8),
+                                      Expanded(child: Text('電池模組列表', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87))),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _buildSidebarBatteryList(),
                                 ],
                               ),
                             ),
