@@ -23,7 +23,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool rememberPassword = false;
-  bool autoLogin = false;
   bool _isLoading = false;
   bool _obscurePassword = true;
 
@@ -63,7 +62,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkConnection() async {
-    // 🎯 邏輯判斷：網頁版不依賴 SocketException 判斷網路
     if (kIsWeb) {
       if (!_isServerConnected && mounted) {
         setState(() => _isServerConnected = true);
@@ -122,7 +120,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       rememberPassword = prefs.getBool('remember_password') ?? false;
-      autoLogin = prefs.getBool('auto_login') ?? false;
       if (rememberPassword) {
         _emailController.text = prefs.getString('saved_email') ?? '';
         _passwordController.text = prefs.getString('saved_password') ?? '';
@@ -149,9 +146,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
       );
 
       if (res.session != null) {
-        // 🎯 網頁版專屬權限檢查防護網 (手動登入) 
-        // 這裡維持 kIsWeb，因為權限限制與螢幕寬度無關，只要是網頁版就受限
-        
         String platform = kIsWeb ? '網頁版管理平台' : '手機APP';
         await logUserAction(
           '登入', 
@@ -160,7 +154,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_password', rememberPassword);
-        await prefs.setBool('auto_login', autoLogin);
 
         if (rememberPassword) {
           await prefs.setString('saved_email', _emailController.text.trim());
@@ -467,7 +460,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // 🎯 新增：判斷當前視窗是否為寬螢幕 (大於 800px)
     final bool isWideScreen = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
@@ -475,7 +467,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
         children: [
           Positioned.fill(
             child: Image.asset(
-              // 🎯 動態判斷：寬螢幕載入 web_login_bg.png，窄螢幕載入手機版原圖
               isWideScreen ? 'assets/web_login_bg.png' : 'assets/login_full_bg.png', 
               fit: BoxFit.cover,
             ),
@@ -493,17 +484,14 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                       child: IntrinsicHeight(
                         child: Column(
                           children: [
-                            // 🎯 動態高度：網頁版使用 Spacer 垂直置中，手機版維持原本距離頂部 200px 的設定
                             isWideScreen ? const Spacer() : const SizedBox(height: 200), 
                             
                             Padding(
-                              // 🎯 動態設定邊距：寬螢幕右側保留 120 px，窄螢幕維持左右 24 px
                               padding: EdgeInsets.only(
                                 left: 24.0, 
                                 right: isWideScreen ? 120.0 : 24.0,
                               ),
                               child: Align( 
-                                // 🎯 動態對齊：寬螢幕靠右對齊，窄螢幕自動置中
                                 alignment: isWideScreen ? Alignment.centerRight : Alignment.center,
                                 child: ConstrainedBox( 
                                   constraints: const BoxConstraints(maxWidth: 400),
@@ -537,7 +525,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                             TextField(
                                               controller: _emailController,
                                               keyboardType: TextInputType.emailAddress,
-                                              textInputAction: TextInputAction.next, // 🎯 按 Enter 自動跳下一格
+                                              textInputAction: TextInputAction.next,
                                               style: const TextStyle(fontSize: 13),
                                               decoration: const InputDecoration(labelText: '電子郵件 (Email)', labelStyle: TextStyle(fontSize: 13), prefixIcon: Icon(Icons.email, size: 20), border: OutlineInputBorder()),
                                             ),
@@ -545,8 +533,8 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                             TextField(
                                               controller: _passwordController,
                                               obscureText: _obscurePassword,
-                                              textInputAction: TextInputAction.done, // 🎯 標記為最後輸入項
-                                              onSubmitted: (_) {                     // 🎯 監聽鍵盤 Enter 事件
+                                              textInputAction: TextInputAction.done, 
+                                              onSubmitted: (_) {                     
                                                 if (!_isLoading) _handleLogin();
                                               },
                                               style: const TextStyle(fontSize: 13),
@@ -570,6 +558,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                               ),
                                             ),
                                             const SizedBox(height: 8),
+                                            // 🎯 修改區塊：移除自動登入，並將忘記密碼移至此處
                                             Row(
                                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                               children: [
@@ -579,23 +568,18 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                                     const Text('記住密碼', style: TextStyle(color: Colors.black87, fontSize: 12)),
                                                   ],
                                                 ),
-                                                Row(
-                                                  children: [
-                                                    Checkbox(
-                                                      value: autoLogin, activeColor: Colors.teal, 
-                                                      onChanged: (value) {
-                                                        setState(() {
-                                                          autoLogin = value ?? false;
-                                                          if (autoLogin) rememberPassword = true;
-                                                        });
-                                                      }
-                                                    ),
-                                                    const Text('自動登入', style: TextStyle(color: Colors.black87, fontSize: 12)),
-                                                  ],
+                                                TextButton(
+                                                  style: TextButton.styleFrom(
+                                                    padding: EdgeInsets.zero,
+                                                    minimumSize: const Size(50, 30),
+                                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                  ),
+                                                  onPressed: _handleForgotPassword, 
+                                                  child: const Text('忘記密碼？', style: TextStyle(color: Colors.black54, fontSize: 12, decoration: TextDecoration.underline))
                                                 ),
                                               ],
                                             ),
-                                            const SizedBox(height: 8),
+                                            const SizedBox(height: 16),
                                             ElevatedButton(
                                               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                                               onPressed: _isLoading ? null : _handleLogin,
@@ -603,17 +587,16 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                                 ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
                                                 : const Text('登入', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
                                             ),
-                                            const SizedBox(height: 16),
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                TextButton(onPressed: _handleForgotPassword, child: const Text('忘記密碼？', style: TextStyle(color: Colors.black54, fontSize: 12, decoration: TextDecoration.underline))),
-                                                OutlinedButton(
-                                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), side: const BorderSide(color: Colors.teal), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                                                  onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())); },
-                                                  child: const Text('註冊新帳號', style: TextStyle(fontSize: 12, color: Colors.teal, fontWeight: FontWeight.bold)),
-                                                ),
-                                              ],
+                                            const SizedBox(height: 12),
+                                            // 🎯 修改區塊：將註冊按鈕獨立放在此處，使其透過外層自動延展為等寬
+                                            OutlinedButton(
+                                              style: OutlinedButton.styleFrom(
+                                                padding: const EdgeInsets.symmetric(vertical: 14), 
+                                                side: const BorderSide(color: Colors.teal), 
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                                              ),
+                                              onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())); },
+                                              child: const Text('註冊新帳號', style: TextStyle(fontSize: 14, color: Colors.teal, fontWeight: FontWeight.bold)),
                                             ),
                                           ],
                                         ),
