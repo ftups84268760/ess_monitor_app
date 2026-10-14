@@ -52,8 +52,13 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _fetchLatestTelemetry();
-      _startTimer();
+      // 🎯 延遲 2 秒，給予手機作業系統重新連線 Wi-Fi / 4G 的緩衝時間
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _fetchLatestTelemetry();
+          _startTimer();
+        }
+      });
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _liveTimer?.cancel();
     }
@@ -804,8 +809,13 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _fetchAlarmsFromSupabase();
-      _startTimer();
+      // 🎯 延遲 2 秒，避免喚醒瞬間網路尚未就緒導致 API 查詢失敗
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _fetchAlarmsFromSupabase();
+          _startTimer();
+        }
+      });
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _alarmTimer?.cancel();
     }

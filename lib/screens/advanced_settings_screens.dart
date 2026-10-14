@@ -723,9 +723,12 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_isOnline) {
-        _setupDirectMqtt();
-      }
+      // 🎯 延遲 2 秒，確保手機從背景喚醒後，網路模組已完全連線，再進行 MQTT 重連
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && _isOnline) {
+          _setupDirectMqtt();
+        }
+      });
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _mqttClient?.disconnect();
     }

@@ -310,7 +310,8 @@ class _RootScreenState extends State<RootScreen> {
     if (_isLoggedIn) {
       // 🎯 用我們剛寫好的監聽器包覆整個已登入的畫面
       return WebSessionTimeoutListener(
-        duration: const Duration(minutes: 5),
+        duration: const Duration(minutes: 10),
+        //duration: const Duration(hours: 1),
         onTimeout: () async {
           // 1. 先執行非同步任務
           final prefs = await SharedPreferences.getInstance();

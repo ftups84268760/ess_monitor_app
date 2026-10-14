@@ -101,7 +101,18 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _updateTimeAndLunar();
+      // 🎯 延遲 2 秒，給予設備網路模組喚醒與重連的時間，避免 Supabase 因斷網而拋出錯誤
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _updateTimeAndLunar();
+          // 如果您有其他需要在喚醒時重新抓取的資料，也可以放在這裡，例如：
+          // _checkOwnership();
+          // _fetchCloudReadBroadcasts().then((_) {
+          //   _fetchNotifications();
+          //   _fetchBroadcasts(); 
+          // });
+        }
+      });
     }
   }
 

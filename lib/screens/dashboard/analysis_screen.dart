@@ -66,8 +66,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _fetchRealtimeLatestAndHistoryData();
-      _startTimer();
+      // 🎯 延遲 2 秒，給予手機作業系統重新連線 Wi-Fi / 4G 的緩衝時間
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _fetchRealtimeLatestAndHistoryData();
+          _startTimer();
+        }
+      });
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _realtimeRefreshTimer?.cancel();
     }

@@ -40,7 +40,12 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _startHeartbeatCheck();
+      // 🎯 延遲 2 秒，給予手機作業系統重新連線 Wi-Fi / 4G 及建立 DNS 連線的緩衝時間
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _startHeartbeatCheck();
+        }
+      });
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _heartbeatTimer?.cancel();
     }

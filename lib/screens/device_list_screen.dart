@@ -122,7 +122,12 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _reloadDeviceList();
+      // 🎯 延遲 2 秒，確保手機網路（Wi-Fi / 4G / DNS）已完全喚醒並建立連線後，再發送設備清單查詢
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _reloadDeviceList();
+        }
+      });
     }
   }
 
