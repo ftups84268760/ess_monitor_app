@@ -652,9 +652,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已關閉「惡劣天氣備援模式」'), backgroundColor: Colors.teal));
       }
     } catch (e) {
+      // 🎯 1. 在終端機印出詳細錯誤供工程師除錯
+      debugPrint('解除備援模式失敗: $e'); 
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('關閉失敗，請檢查網路連線。'), backgroundColor: Colors.redAccent));
+        // 🎯 2. 改用更溫和、安全的通用文字
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('系統連線異常，請檢查網路狀態後再試。'), 
+          backgroundColor: Colors.redAccent
+        ));
       }
     }
   }

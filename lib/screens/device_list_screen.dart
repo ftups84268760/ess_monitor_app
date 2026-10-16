@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -40,7 +41,11 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   final TextEditingController _nameInputController = TextEditingController();
 
   RealtimeChannel? _realtimeChannel;
+  RealtimeChannel? _profileChannel; // 🎯 新增：讓元件自己監聽身分變化
+  StreamSubscription<AuthState>? _authStateSubscription;
+
   String _filterMode = '全部'; 
+  String _localAccountType = ''; // 🎯 新增：內部獨立維護的權限狀態
   
   bool _isLoading = true;
   List<Map<String, dynamic>> _devices = [];
@@ -48,13 +53,70 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   void initState() {
     super.initState();
+    _localAccountType = widget.accountType; // 初始化本地權限
+    
     WidgetsBinding.instance.addObserver(this);
     _setupRealtimeSubscription();
+    _setupProfileSubscription(); // 啟動身分監聽
     _fetchData(); 
+
+    // 監聽 Auth 狀態，解決 Web 端剛登入或重整時的空窗期
+    _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final AuthChangeEvent event = data.event;
+      if (event == AuthChangeEvent.initialSession || event == AuthChangeEvent.signedIn) {
+        if (mounted) {
+          _reloadDeviceList();
+        }
+      }
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndAutoPush();
     });
+  }
+
+  // 🎯 監聽上層 Widget 傳入的屬性變化 (作為備援)
+  @override
+  void didUpdateWidget(DeviceListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.accountType != widget.accountType) {
+      setState(() {
+        _localAccountType = widget.accountType;
+      });
+      _reloadDeviceList();
+    }
+  }
+
+  // 🎯 新增：自己監聽資料庫 Profile 的權限變化，完全不依賴外框！
+  void _setupProfileSubscription() {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    _profileChannel = Supabase.instance.client
+        .channel('public:profiles:device_list_${user.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'profiles',
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq, 
+              column: 'id', 
+              value: user.id),
+          callback: (payload) {
+            if (mounted) {
+              final newRole = payload.newRecord['role'] ?? '一般使用者';
+              // 當發現資料庫裡的權限跟自己目前的不一樣時，強制觸發更新
+              if (_localAccountType != newRole) {
+                debugPrint('🔄 設備列表內部偵測到權限變更: $_localAccountType -> $newRole');
+                setState(() {
+                  _localAccountType = newRole;
+                });
+                _reloadDeviceList();
+              }
+            }
+          },
+        )
+        .subscribe();
   }
 
   Future<void> _checkAndAutoPush() async {
@@ -68,7 +130,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
             isInverterOnline: GlobalDeviceState.isOnline,
             deviceDbId: GlobalDeviceState.deviceId!,
             inverterSn: GlobalDeviceState.sn,
-            accountType: widget.accountType,
+            accountType: _localAccountType, // 🎯 改用內部權限
             isPushedFullScreen: true,
           ),
         ),
@@ -87,31 +149,29 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     _realtimeChannel = Supabase.instance.client
         .channel('public:devices')
         .onPostgresChanges(
-          // 🎯 效能優化 1：監聽所有變更，以便精細分類處理
           event: PostgresChangeEvent.all, 
           schema: 'public',
           table: 'devices',
           callback: (payload) {
-            // 🎯 效能優化 2：針對高頻率的 UPDATE 事件，直接更新本地變數，絕對不發送資料庫請求！
             if (payload.eventType == PostgresChangeEvent.update) {
               final newRecord = payload.newRecord;
               if (newRecord.isNotEmpty && mounted) {
                 setState(() {
-                  // 找到變更的那台設備
                   final index = _devices.indexWhere((d) => d['id'].toString() == newRecord['id'].toString());
                   if (index != -1) {
-                    // 保留本地已經計算好的錯誤狀態 (因為 device_alarms 沒有變更)
                     final bool currentFault = _devices[index]['has_active_fault'] ?? false;
-                    // 將新數值合併進本地列表
+                    final int? currentSoc = _devices[index]['battery_soc'];
+                    final int? currentPwrDir = _devices[index]['battery_power_dir'];
+                    
                     _devices[index] = {..._devices[index], ...newRecord};
                     _devices[index]['has_active_fault'] = currentFault;
+                    _devices[index]['battery_soc'] = currentSoc;
+                    _devices[index]['battery_power_dir'] = currentPwrDir;
                   }
                 });
               }
             } 
-            // 🎯 效能優化 3：只有發生極低頻的新增/刪除設備事件時，才真正重新下載列表
             else if (payload.eventType == PostgresChangeEvent.insert || payload.eventType == PostgresChangeEvent.delete) {
-              debugPrint('🔄 設備列表發生增減，重新撈取資料庫...');
               _reloadDeviceList();
             }
           },
@@ -122,7 +182,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // 🎯 延遲 2 秒，確保手機網路（Wi-Fi / 4G / DNS）已完全喚醒並建立連線後，再發送設備清單查詢
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           _reloadDeviceList();
@@ -151,7 +210,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     if (user == null) return [];
 
     try {
-      final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin' || widget.accountType == '系統管理員(root)';
+      // 🎯 改用內部權限判斷
+      final bool isAdmin = _localAccountType == '系統管理員' || _localAccountType == 'admin' || _localAccountType == '系統管理員(root)';
       List<dynamic> response;
       
       if (isAdmin) {
@@ -183,6 +243,37 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           for (var d in devices) {
             d['has_active_fault'] = faultedSns.contains(d['sn'].toString());
           }
+          
+          await Future.wait(devices.map((d) async {
+            final String sn = d['sn'].toString();
+            if (sn.isEmpty) return;
+            try {
+              final testRes = await Supabase.instance.client
+                  .from('telemetry_test')
+                  .select('battery_capacity')
+                  .eq('device_id', sn)
+                  .order('created_at', ascending: false)
+                  .limit(1)
+                  .maybeSingle();
+              
+              final invPsRes = await Supabase.instance.client
+                  .from('telemetry_inv_ps')
+                  .select('battery_power_direction')
+                  .eq('device_id', sn)
+                  .order('created_at', ascending: false)
+                  .limit(1)
+                  .maybeSingle();
+
+              if (testRes != null) {
+                d['battery_soc'] = int.tryParse(testRes['battery_capacity'].toString());
+              }
+              if (invPsRes != null) {
+                d['battery_power_dir'] = int.tryParse(invPsRes['battery_power_direction'].toString());
+              }
+            } catch (e) {
+              debugPrint('抓取設備 $sn 電池狀態失敗: $e');
+            }
+          }));
         }
       }
       
@@ -226,7 +317,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('設定失敗: $e'), backgroundColor: Colors.redAccent)
+          const SnackBar(content: Text('設定失敗，請確認網路狀態後重試'), backgroundColor: Colors.redAccent)
         );
       }
     }
@@ -274,8 +365,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                   .eq('id', deviceId);
 
                   await logUserAction('更改設備名稱', details: '將設備改名為: $newName');
-      
-                // 註：這裡我們不主動呼叫 _reloadDeviceList(); 因為 Realtime WebSocket 會攔截 UPDATE 事件並自動在本地更新 UI
               } catch (e) {
                 debugPrint('設備改名失敗: $e');
               }
@@ -290,9 +379,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   Future<void> _deleteDevice(dynamic deviceId) async {
     try {
       await Supabase.instance.client.from('devices').delete().eq('id', deviceId);
-
       await logUserAction('刪除設備', details: '使用者移除了設備紀錄');
-
       _reloadDeviceList();
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
@@ -346,9 +433,66 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     );
   }
 
+  Widget _buildDynamicBatteryIcon(int? soc, bool isCharging) {
+    if (soc == null) {
+      return const Icon(Icons.battery_unknown_rounded, color: Colors.black45, size: 16);
+    }
+    
+    Color batteryColor = Colors.teal;
+    if (soc <= 20) {
+      batteryColor = Colors.redAccent;
+    } else if (soc <= 50) {
+      batteryColor = Colors.orangeAccent;
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 22,
+          height: 11,
+          padding: const EdgeInsets.all(1.0),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.black54, width: 1.0),
+            borderRadius: BorderRadius.circular(2.5),
+          ),
+          child: Stack(
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  width: 18.0 * (soc / 100.0), 
+                  decoration: BoxDecoration(
+                    color: batteryColor,
+                    borderRadius: BorderRadius.circular(1.0),
+                  ),
+                ),
+              ),
+              if (isCharging)
+                const Center(
+                  child: Icon(Icons.bolt_rounded, size: 9, color: Colors.white),
+                ),
+            ],
+          ),
+        ),
+        Container(
+          width: 2.0,
+          height: 4,
+          decoration: const BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.horizontal(right: Radius.circular(2)),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   void dispose() {
     _realtimeChannel?.unsubscribe();
+    _profileChannel?.unsubscribe(); // 🎯 釋放
+    _authStateSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -356,7 +500,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final String currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
-    final bool isAdmin = widget.accountType == '系統管理員' || widget.accountType == 'admin' || widget.accountType == '系統管理員(root)';
+    // 🎯 改用內部權限判斷
+    final bool isAdmin = _localAccountType == '系統管理員' || _localAccountType == 'admin' || _localAccountType == '系統管理員(root)';
 
     int totalCount = _devices.length;
     int onlineCount = _devices.where((d) => d['is_online'] == true).length;
@@ -509,6 +654,10 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                         final bool hasFault = device['has_active_fault'] ?? false;
                         final String deviceId = device['id'].toString();
                         final bool isOwner = device['user_id'] == currentUserId;
+                        
+                        final int? soc = device['battery_soc'];
+                        final int? powerDir = device['battery_power_dir'];
+                        final bool isCharging = powerDir == 1;
 
                         Color statusColor;
                         if (!online) {
@@ -551,7 +700,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                         isInverterOnline: online,
                                         deviceDbId: deviceId,
                                         inverterSn: devSn,
-                                        accountType: widget.accountType,
+                                        accountType: _localAccountType, // 🎯 改用內部權限
                                         isPushedFullScreen: true,
                                       ),
                                     ),
@@ -636,54 +785,86 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                     
                                     const Spacer(), 
                                     
-                                    if (isOwner)
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.end,
-                                        children: [
-                                          InkWell(
-                                            borderRadius: BorderRadius.circular(20),
-                                            onTap: () => _showManageSharesModal(deviceId, device['name'] ?? ''),
-                                            child: const Padding(padding: EdgeInsets.all(6.0), child: Icon(Icons.share, size: 18, color: Colors.teal)),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          InkWell(
-                                            borderRadius: BorderRadius.circular(20),
-                                            onTap: () => _editDeviceNameDialog(deviceId, device['name'] ?? ''),
-                                            child: const Padding(padding: EdgeInsets.all(6.0), child: Icon(Icons.edit, size: 18, color: Colors.black26)),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          InkWell(
-                                            borderRadius: BorderRadius.circular(20),
-                                            onTap: () async {
-                                               final confirm = await showDialog<bool>(
-                                                  context: context,
-                                                  builder: (context) => AlertDialog(
-                                                    title: const Text('移除設備確認', style: TextStyle(color: Colors.redAccent)),
-                                                    content: Text('確定要永久移除「${device['name']}」嗎？'),
-                                                    actions: [
-                                                      TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
-                                                      TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('確定', style: TextStyle(color: Colors.redAccent))),
-                                                    ],
-                                                  ),
-                                                );
-                                                if (confirm == true) {
-                                                   _deleteDevice(deviceId);
-                                                }
-                                            },
-                                            child: const Padding(padding: EdgeInsets.all(6.0), child: Icon(Icons.delete_outline, size: 18, color: Colors.redAccent)),
-                                          ),
-                                        ],
-                                      )
-                                    else if (device['allow_notifications'] != null)
-                                      Align(
-                                        alignment: Alignment.centerRight,
-                                        child: IconButton(
-                                          icon: Icon((device['allow_notifications'] == true) ? Icons.notifications_active : Icons.notifications_off_outlined, color: (device['allow_notifications'] == true) ? Colors.teal : Colors.black38, size: 20),
-                                          constraints: const BoxConstraints(),
-                                          padding: const EdgeInsets.all(4),
-                                          onPressed: () => _toggleSharedPushNotification(deviceId, device['allow_notifications'] == true),
-                                        ),
-                                      )
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        soc != null
+                                            ? Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: isCharging ? Colors.orange.withValues(alpha: 0.1) : Colors.teal.withValues(alpha: 0.05),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: isCharging ? Colors.orange.withValues(alpha: 0.3) : Colors.teal.withValues(alpha: 0.2)),
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    _buildDynamicBatteryIcon(soc, isCharging),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      '$soc%',
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: isCharging ? Colors.orange.shade700 : Colors.teal.shade700,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              )
+                                            : const SizedBox.shrink(),
+
+                                        if (isOwner)
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            children: [
+                                              InkWell(
+                                                borderRadius: BorderRadius.circular(20),
+                                                onTap: () => _showManageSharesModal(deviceId, device['name'] ?? ''),
+                                                child: const Padding(padding: EdgeInsets.all(6.0), child: Icon(Icons.share, size: 18, color: Colors.teal)),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              InkWell(
+                                                borderRadius: BorderRadius.circular(20),
+                                                onTap: () => _editDeviceNameDialog(deviceId, device['name'] ?? ''),
+                                                child: const Padding(padding: EdgeInsets.all(6.0), child: Icon(Icons.edit, size: 18, color: Colors.black26)),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              InkWell(
+                                                borderRadius: BorderRadius.circular(20),
+                                                onTap: () async {
+                                                   final confirm = await showDialog<bool>(
+                                                      context: context,
+                                                      builder: (context) => AlertDialog(
+                                                        title: const Text('移除設備確認', style: TextStyle(color: Colors.redAccent)),
+                                                        content: Text('確定要永久移除「${device['name']}」嗎？'),
+                                                        actions: [
+                                                          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
+                                                          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('確定', style: TextStyle(color: Colors.redAccent))),
+                                                        ],
+                                                      ),
+                                                    );
+                                                    if (confirm == true) {
+                                                       _deleteDevice(deviceId);
+                                                    }
+                                                },
+                                                child: const Padding(padding: EdgeInsets.all(6.0), child: Icon(Icons.delete_outline, size: 18, color: Colors.redAccent)),
+                                              ),
+                                            ],
+                                          )
+                                        else if (device['allow_notifications'] != null)
+                                          Align(
+                                            alignment: Alignment.centerRight,
+                                            child: IconButton(
+                                              icon: Icon((device['allow_notifications'] == true) ? Icons.notifications_active : Icons.notifications_off_outlined, color: (device['allow_notifications'] == true) ? Colors.teal : Colors.black38, size: 20),
+                                              constraints: const BoxConstraints(),
+                                              padding: const EdgeInsets.all(4),
+                                              onPressed: () => _toggleSharedPushNotification(deviceId, device['allow_notifications'] == true),
+                                            ),
+                                          )
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ),
@@ -703,6 +884,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   }
 }
 
+// ... ManageSharesBottomSheet 和 showReceiveDeviceDialog 保持不變
 class ManageSharesBottomSheet extends StatefulWidget {
   final String deviceDbId;
   final String deviceName;
@@ -1004,9 +1186,10 @@ void showReceiveDeviceDialog(BuildContext context, VoidCallback onSuccessRefresh
                         setState(() => isProcessing = false);
                       }
                     } catch (e) {
+                      debugPrint('接收設備發生異常: $e');
                       if (dialogContext.mounted) {
                         ScaffoldMessenger.of(context).clearSnackBars(); 
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('錯誤細節: ${e.toString()}'), backgroundColor: Colors.redAccent));
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('系統連線異常，請稍後再試'), backgroundColor: Colors.redAccent));
                         setState(() => isProcessing = false);
                       }
                     }

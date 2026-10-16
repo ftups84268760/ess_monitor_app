@@ -1,21 +1,24 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 🎯 引入這行來使用 HapticFeedback 震動回饋
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
-// 🎯 引入 Logger
 import '../utils/audit_logger.dart';
-// 🎯 引入 DTU 更換畫面
 import 'dashboard/dtu_replacement_screen.dart';
 
 String _getFriendlyErrorMsg(dynamic e) {
   final String errorMsg = e.toString();
-  if (errorMsg.contains('SocketException') || errorMsg.contains('Failed host lookup')) {
-    return '無法連線至雲端伺服器，請檢查您的 Wi-Fi 或網路連線狀態。';
+  
+  debugPrint('API Error: $errorMsg');
+  
+  if (errorMsg.contains('SocketException') || errorMsg.contains('Failed host lookup') || errorMsg.contains('ClientException')) {
+    return '無法連線至雲端伺服器，請檢查您的網路狀態。';
   }
-  return '錯誤細節: $errorMsg';
+  
+  return '發生系統連線異常，請稍後再試。';
 }
 
 // ==========================================
@@ -723,7 +726,6 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // 🎯 延遲 2 秒，確保手機從背景喚醒後，網路模組已完全連線，再進行 MQTT 重連
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted && _isOnline) {
           _setupDirectMqtt();
@@ -781,14 +783,6 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
       _mqttClient?.disconnect();
       if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  List<int> _generateList(int start, int end, int step) {
-    List<int> list = [];
-    for (int i = start; i <= end; i += step) {
-      list.add(i);
-    }
-    return list;
   }
 
   Future<void> _queryDeviceSettings() async {
@@ -927,11 +921,11 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
         body: {'sn': widget.inverterSn, 'commands': [cmd]},
       );
 
-      await logUserAction('更改電池參數', details: '針對設備 ${widget.inverterSn} 執行了 SOC 電位設定變更');
+      await logUserAction('更改電池參數', details: '針對設備 ${widget.inverterSn} 執行了電池電量設定變更');
 
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SOC設定已發送'), backgroundColor: Colors.teal));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('電池電量設定已發送'), backgroundColor: Colors.teal));
       }
     } catch (e) {
       if (mounted) {
@@ -960,51 +954,54 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
     );
   }
 
-  Widget _buildControlRow({
+  // 🎯 新增：將建構選項抽離，整合新的 _TeslaSlider 互動滑桿
+  Widget _buildPowerwallSlider({
     required String title,
-    required int? value, 
-    required List<int> options,
-    required String unit,
-    required Function(int?) onChanged,
-    Widget? trailingAction,
+    String? subtitle,
+    required int? value,
+    required int min,
+    required int max,
+    required int step,
+    required Function(int) onChanged,
+    required String Function(int) leftLabelBuilder,
+    required String Function(int) rightLabelBuilder,
+    Color activeColor = Colors.teal,
   }) {
-    final safeValue = (value != null && options.contains(value)) ? value : null;
-    
+    final safeValue = (value != null && value >= min && value <= max) ? value : min;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      padding: const EdgeInsets.only(bottom: 24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 48,
-                  child: DropdownButtonFormField<int>(
-                    key: ValueKey(safeValue), 
-                    initialValue: safeValue,  
-                    hint: Text('-- $unit', style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.bold)),
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Colors.teal),
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                      filled: true,
-                      fillColor: const Color(0xFFF5F5F5),
-                    ),
-                    items: options.map((opt) => DropdownMenuItem(value: opt, child: Text('$opt $unit', style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.bold)))).toList(),
-                    onChanged: onChanged,
-                  ),
-                ),
-              ],
-            ),
+          Text(title, style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.bold)),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                value != null ? leftLabelBuilder(value) : '--',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: activeColor),
+              ),
+              Text(
+                value != null ? rightLabelBuilder(value) : '',
+                style: const TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w600),
+              ),
+            ],
           ),
-          if (trailingAction != null) ...[
-            const SizedBox(width: 12),
-            trailingAction,
-          ]
+          const SizedBox(height: 8),
+          _TeslaSlider(
+            value: safeValue,
+            min: min,
+            max: max,
+            step: step,
+            activeColor: activeColor,
+            onChanged: onChanged,
+          ),
         ],
       ),
     );
@@ -1039,13 +1036,21 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                     children: [
                       const Text('充電設定', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.teal)),
                       const Divider(color: Color(0xFFF1F5F9), height: 32),
-                      _buildControlRow(
+                      
+                      // 🎯 使用高質感互動滑桿取代原本的 Dropdown
+                      _buildPowerwallSlider(
                         title: '最大市電充電電流',
                         value: _maxAcChargeCurrent,
-                        options: _generateList(10, 100, 10),
-                        unit: 'A',
-                        onChanged: (v) => setState(() => _maxAcChargeCurrent = v!),
-                        trailingAction: _buildSendButton(
+                        min: 10, max: 100, step: 10,
+                        activeColor: Colors.teal,
+                        onChanged: (v) => setState(() => _maxAcChargeCurrent = v),
+                        leftLabelBuilder: (v) => '$v A',
+                        rightLabelBuilder: (v) => '最大 100 A',
+                      ),
+                      
+                      SizedBox(
+                        width: double.infinity,
+                        child: _buildSendButton(
                           label: '設定', 
                           color: Colors.teal, 
                           onPressed: _sendAcChargeCurrent
@@ -1069,30 +1074,37 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('SOC相關設定', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const Text('電池電量相關設定', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.teal)),
                       const Divider(color: Color(0xFFF1F5F9), height: 32),
                       
                       Row(
                         children: [
                           const Icon(Icons.power_off_rounded, size: 18, color: Colors.blueAccent),
                           const SizedBox(width: 8),
-                          const Text('無市電(Off-Grid)狀態', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                          const Text('無市電 (Off-Grid) 狀態', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
                         ],
                       ), 
-                      const SizedBox(height: 16),
-                      _buildControlRow(
-                        title: '電池截止放電 SOC',
+                      const SizedBox(height: 24),
+                      
+                      _buildPowerwallSlider(
+                        title: '電池截止放電電量',
+                        subtitle: '市電停電時，電池放電的截止電量',
                         value: _offGridDischargeSoc,
-                        options: _generateList(0, 80, 5),
-                        unit: '%',
-                        onChanged: (v) => setState(() => _offGridDischargeSoc = v!),
+                        min: 0, max: 80, step: 5,
+                        activeColor: Colors.blueAccent,
+                        onChanged: (v) => setState(() => _offGridDischargeSoc = v),
+                        leftLabelBuilder: (v) => '$v% 放電截止電量',
+                        rightLabelBuilder: (v) => '${100 - v}% 可用電量',
                       ),
-                      _buildControlRow(
-                        title: '電池重新放電 SOC',
+                      _buildPowerwallSlider(
+                        title: '電池重新放電電量',
+                        subtitle: '市電停電時，允許再次放電的最低電量',
                         value: _offGridRecoverySoc,
-                        options: _generateList(10, 80, 5),
-                        unit: '%',
-                        onChanged: (v) => setState(() => _offGridRecoverySoc = v!),
+                        min: 10, max: 80, step: 5,
+                        activeColor: Colors.blueAccent,
+                        onChanged: (v) => setState(() => _offGridRecoverySoc = v),
+                        leftLabelBuilder: (v) => '$v% 恢復放電閾值',
+                        rightLabelBuilder: (v) => '',
                       ),
 
                       const Padding(
@@ -1104,26 +1116,33 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                         children: [
                           const Icon(Icons.power_rounded, size: 18, color: Colors.orangeAccent),
                           const SizedBox(width: 8),
-                          const Text('有市電(On-Grid)狀態', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
+                          const Text('有市電 (On-Grid) 狀態', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
                         ],
                       ), 
-                      const SizedBox(height: 16),
-                      _buildControlRow(
-                        title: '電池截止放電 SOC',
+                      const SizedBox(height: 24),
+                      
+                      _buildPowerwallSlider(
+                        title: '電池截止放電電量',
+                        subtitle: '市電正常時，預留給緊急斷電備援的最低電量',
                         value: _onGridDischargeSoc,
-                        options: _generateList(5, 95, 5),
-                        unit: '%',
-                        onChanged: (v) => setState(() => _onGridDischargeSoc = v!),
+                        min: 5, max: 95, step: 5,
+                        activeColor: Colors.orangeAccent,
+                        onChanged: (v) => setState(() => _onGridDischargeSoc = v),
+                        leftLabelBuilder: (v) => '$v% 備援用量',
+                        rightLabelBuilder: (v) => '${100 - v}% 每日用量',
                       ),
-                      _buildControlRow(
-                        title: '電池重新放電 SOC',
+                      _buildPowerwallSlider(
+                        title: '電池重新放電電量',
+                        subtitle: '市電正常時，允許再次放電的最低電量',
                         value: _onGridRecoverySoc,
-                        options: _generateList(10, 100, 5),
-                        unit: '%',
-                        onChanged: (v) => setState(() => _onGridRecoverySoc = v!),
+                        min: 10, max: 100, step: 5,
+                        activeColor: Colors.orangeAccent,
+                        onChanged: (v) => setState(() => _onGridRecoverySoc = v),
+                        leftLabelBuilder: (v) => '$v% 恢復放電閾值',
+                        rightLabelBuilder: (v) => '',
                       ),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,
                         child: _buildSendButton(
@@ -1146,6 +1165,133 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
             )
         ],
       ),
+    );
+  }
+}
+
+// ─── 🛡️ 以下為專門為了還原 Tesla Powerwall 手感打造的客製化元件 ───
+
+class _TeslaSlider extends StatefulWidget {
+  final int value;
+  final int min;
+  final int max;
+  final int step;
+  final Color activeColor;
+  final ValueChanged<int> onChanged;
+
+  const _TeslaSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.activeColor,
+    required this.onChanged,
+  });
+
+  @override
+  State<_TeslaSlider> createState() => _TeslaSliderState();
+}
+
+class _TeslaSliderState extends State<_TeslaSlider> {
+  bool _isInteracting = false;
+  int _lastHapticValue = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastHapticValue = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final int divisions = ((widget.max - widget.min) / widget.step).round();
+
+    // 🎯 TweenAnimationBuilder 讓軌道高度的變化有流暢的動畫感
+    return TweenAnimationBuilder<double>(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOutCubic,
+      tween: Tween<double>(begin: 6.0, end: _isInteracting ? 18.0 : 6.0),
+      builder: (context, trackHeight, child) {
+        return SliderTheme(
+          data: SliderThemeData(
+            trackHeight: trackHeight,
+            activeTrackColor: widget.activeColor,
+            inactiveTrackColor: widget.activeColor.withValues(alpha: 0.15),
+            thumbColor: Colors.white,
+            overlayColor: widget.activeColor.withValues(alpha: 0.1),
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 14.0, elevation: 4.0),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 24.0),
+            // 🎯 掛載我們繪製的垂直線條刻度，並透過顏色與透明度來切換顯示狀態
+            tickMarkShape: const _VerticalLineTickMarkShape(tickThickness: 2.5),
+            activeTickMarkColor: _isInteracting ? Colors.white.withValues(alpha: 0.6) : Colors.transparent,
+            inactiveTickMarkColor: _isInteracting ? widget.activeColor.withValues(alpha: 0.4) : Colors.transparent,
+            trackShape: const RoundedRectSliderTrackShape(),
+          ),
+          child: Slider(
+            value: widget.value.toDouble(),
+            min: widget.min.toDouble(),
+            max: widget.max.toDouble(),
+            divisions: divisions,
+            onChangeStart: (val) {
+              setState(() => _isInteracting = true);
+              HapticFeedback.lightImpact(); // 按下瞬間給予輕微震動回饋
+            },
+            onChanged: (val) {
+              final intNewVal = val.round();
+              if (intNewVal != _lastHapticValue) {
+                HapticFeedback.selectionClick(); // 每經過一個刻度段就觸發震動
+                _lastHapticValue = intNewVal;
+              }
+              widget.onChanged(intNewVal);
+            },
+            onChangeEnd: (val) {
+              setState(() => _isInteracting = false);
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+// 🎯 客製化的 Slider 刻度繪圖器，將預設的圓點改成垂直方塊線條
+class _VerticalLineTickMarkShape extends SliderTickMarkShape {
+  final double tickThickness;
+  const _VerticalLineTickMarkShape({this.tickThickness = 2.0});
+
+  @override
+  Size getPreferredSize({required SliderThemeData sliderTheme, required bool isEnabled}) {
+    return Size(tickThickness, sliderTheme.trackHeight ?? 4.0);
+  }
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    required bool isEnabled,
+  }) {
+    // 依據刻度是在拉桿左邊或右邊，決定使用什麼顏色的線條
+    final bool isLeft = center.dx <= thumbCenter.dx;
+    final Color? tickColor = isLeft ? sliderTheme.activeTickMarkColor : sliderTheme.inactiveTickMarkColor;
+    
+    // 如果顏色被設定為透明 (代表沒有被長按互動時)，就什麼都不畫
+    if (tickColor == null || tickColor == Colors.transparent) return;
+
+    final Paint paint = Paint()..color = tickColor;
+    // 線條高度略小於軌道高度，保留內嵌感
+    final double lineLength = (sliderTheme.trackHeight ?? 4.0) * 0.6; 
+    
+    context.canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: center, width: tickThickness, height: lineLength),
+        const Radius.circular(1.0),
+      ),
+      paint,
     );
   }
 }

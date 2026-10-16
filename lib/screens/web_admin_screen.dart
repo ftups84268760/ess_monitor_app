@@ -35,12 +35,14 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   Timer? _loginTimer;
   DateTime? _loginTime;
   String _loginDurationStr = '00:00:00';
+  RealtimeChannel? _profileChannel; // 🎯 新增：用來監聽自身權限變化的頻道
 
   @override
   void initState() {
     super.initState();
     _fetchUserProfile(); 
     _initLoginTimer(); 
+    _setupProfileSubscription(); // 🎯 新增：啟動權限監聽
 
     if (GlobalDeviceState.deviceId != null) {
       _selectedDeviceDbId = GlobalDeviceState.deviceId;
@@ -48,6 +50,41 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
       _selectedDeviceName = GlobalDeviceState.customName;
       _selectedDeviceSn = GlobalDeviceState.sn;
     }
+  }
+
+  // 🎯 新增：監聽當前使用者的 Profile 變化 (包含權限被降級)
+  void _setupProfileSubscription() {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    _profileChannel = Supabase.instance.client
+        .channel('public:profiles:id=eq.${user.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'profiles',
+          filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq, 
+              column: 'id', 
+              value: user.id),
+          callback: (payload) {
+            if (mounted) {
+              final newRole = payload.newRecord['role'] ?? '一般使用者';
+              setState(() {
+                _userRole = newRole;
+                _isAdmin = _userRole.contains('系統管理員') || _userRole == 'admin';
+                _isRoot = _userRole == '系統管理員(root)';
+                _avatarUrl = payload.newRecord['avatar_url'];
+
+                // 🛡️ 安全防護：如果使用者原本停留在「進階功能」頁面卻被降級，強制將他踢回「設備列表」
+                if (!_isAdmin && _selectedIndex == 2) {
+                  _selectedIndex = 0;
+                }
+              });
+            }
+          },
+        )
+        .subscribe();
   }
 
   void _initLoginTimer() {
@@ -83,7 +120,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
       if (data != null && mounted) {
         setState(() {
           _userRole = data['role'] ?? '一般使用者';
-          _isAdmin = _userRole.contains('管理員') || _userRole == 'admin';
+          _isAdmin = _userRole.contains('系統管理員') || _userRole == 'admin';
           _isRoot = _userRole == '系統管理員(root)'; 
           _avatarUrl = data['avatar_url'];
         });
@@ -96,6 +133,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   @override
   void dispose() {
     _loginTimer?.cancel(); 
+    _profileChannel?.unsubscribe(); // 🎯 新增：釋放監聽頻道
     if (_selectedDeviceDbId != null) {
       GlobalDeviceState.needsNarrowPush = true;
     }

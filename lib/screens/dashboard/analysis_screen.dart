@@ -69,7 +69,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
       // 🎯 延遲 2 秒，給予手機作業系統重新連線 Wi-Fi / 4G 的緩衝時間
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
-          _fetchRealtimeLatestAndHistoryData();
+          _fetchRealtimeLatestAndHistoryData(isSilent: true); // 🎯 補上 isSilent，讓喚醒更新完全隱形
           _startTimer();
         }
       });

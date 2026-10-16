@@ -55,7 +55,7 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
       // 🎯 延遲 2 秒，給予手機作業系統重新連線 Wi-Fi / 4G 的緩衝時間
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
-          _fetchLatestTelemetry();
+          _fetchLatestTelemetry(isSilent: true); // 🎯 補上 isSilent
           _startTimer();
         }
       });
@@ -812,7 +812,7 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
       // 🎯 延遲 2 秒，避免喚醒瞬間網路尚未就緒導致 API 查詢失敗
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
-          _fetchAlarmsFromSupabase();
+          _fetchAlarmsFromSupabase(isSilent: true); // 🎯 補上 isSilent
           _startTimer();
         }
       });
@@ -895,11 +895,13 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
         });
       }
     } catch (e) {
+      // 🎯 1. 在終端機印出詳細錯誤，但絕不在 UI 上顯示
       debugPrint('取得告警清單失敗: $e');
       if (mounted && !isSilent) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('讀取失敗: ${e.toString()}'), 
+        // 🎯 2. 改用溫和、安全的提示文字
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('資料讀取失敗，請檢查網路狀態後再試。'), 
           backgroundColor: Colors.redAccent
         ));
         setState(() => _isLoading = false);
