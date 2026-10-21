@@ -46,7 +46,8 @@ class _RawDataScreenState extends State<RawDataScreen> with WidgetsBindingObserv
 
   void _startTimer() {
     _liveTimer?.cancel();
-    _liveTimer = Timer.periodic(const Duration(seconds: 60), (_) => _fetchLatestTelemetry(isSilent: true));
+    // 🎯 效能優化：將背景輪詢時間由 60 秒拉長至 300 秒 (5 分鐘) 以降低 API 呼叫頻率
+    _liveTimer = Timer.periodic(const Duration(seconds: 300), (_) => _fetchLatestTelemetry(isSilent: true));
   }
 
   @override
@@ -802,8 +803,8 @@ class _AlarmListScreenState extends State<AlarmListScreen> with SingleTickerProv
 
   void _startTimer() {
     _alarmTimer?.cancel();
-    // 保留 60 秒的背景輪詢作為備用安全機制
-    _alarmTimer = Timer.periodic(const Duration(seconds: 60), (_) => _fetchAlarmsFromSupabase(isSilent: true));
+    // 🎯 效能優化：既然已經有了 Realtime 訂閱，這裡僅保留 300 秒 (5 分鐘) 的背景輪詢作為備用安全網即可
+    _alarmTimer = Timer.periodic(const Duration(seconds: 300), (_) => _fetchAlarmsFromSupabase(isSilent: true));
   }
 
   @override

@@ -58,7 +58,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with SingleTickerProvid
 
   void _startTimer() {
     _realtimeRefreshTimer?.cancel();
-    _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
+    // 🎯 效能優化：分析頁面的數據不需秒級即時，將背景輪詢拉長至 300 秒 (5 分鐘)
+    _realtimeRefreshTimer = Timer.periodic(const Duration(seconds: 300), (timer) {
       _fetchRealtimeLatestAndHistoryData(isSilent: true);
     });
   }
