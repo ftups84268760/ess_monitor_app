@@ -454,7 +454,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           height: 11,
           padding: const EdgeInsets.all(1.0),
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.black54, width: 1.0),
+            // 🎯 修改：當充電時外框變成橘色，否則為深灰色
+            border: Border.all(color: isCharging ? Colors.orangeAccent : Colors.black54, width: 1.0),
             borderRadius: BorderRadius.circular(2.5),
           ),
           child: Stack(
@@ -464,14 +465,16 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                 child: Container(
                   width: 18.0 * (soc / 100.0), 
                   decoration: BoxDecoration(
-                    color: batteryColor,
+                    // 🎯 修改：當充電時進度條也變成橘色
+                    color: isCharging ? Colors.orangeAccent : batteryColor,
                     borderRadius: BorderRadius.circular(1.0),
                   ),
                 ),
               ),
               if (isCharging)
                 const Center(
-                  child: Icon(Icons.bolt_rounded, size: 9, color: Colors.white),
+                  // 🎯 修改：將閃電符號顏色設為白色，大小稍微調整讓它更居中清晰
+                  child: Icon(Icons.bolt_rounded, size: 9, color: Colors.teal),
                 ),
             ],
           ),
@@ -479,9 +482,10 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
         Container(
           width: 2.0,
           height: 4,
-          decoration: const BoxDecoration(
-            color: Colors.black54,
-            borderRadius: BorderRadius.horizontal(right: Radius.circular(2)),
+          decoration: BoxDecoration(
+            // 🎯 修改：當充電時，電池凸起的部分也變成橘色
+            color: isCharging ? Colors.orangeAccent : Colors.black54,
+            borderRadius: const BorderRadius.horizontal(right: Radius.circular(2)),
           ),
         ),
       ],

@@ -6,12 +6,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_html/html.dart' as html; 
 import 'package:flutter/foundation.dart'; 
 import 'package:mqtt_client/mqtt_client.dart';
+import 'package:package_info_plus/package_info_plus.dart'; // 🎯 新增：引入讀取版本資訊的套件
 import '../utils/mqtt_factory.dart';
 
 import 'device_list_screen.dart'; 
 import 'dashboard/inner_dashboard.dart'; 
 import '../main.dart'; 
 import '../utils/audit_logger.dart';
+import 'profile_screen.dart'; 
 
 class WebAdminScreen extends StatefulWidget {
   const WebAdminScreen({super.key});
@@ -30,19 +32,28 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   bool _isAdmin = false;
   bool _isRoot = false; 
   String _userRole = '一般使用者';
+  String _nickname = '使用者'; 
   String? _avatarUrl;
 
   Timer? _loginTimer;
   DateTime? _loginTime;
   String _loginDurationStr = '00:00:00';
-  RealtimeChannel? _profileChannel; // 🎯 新增：用來監聽自身權限變化的頻道
+  String _currentTimeStr = ''; 
+  String _appVersion = '讀取中...'; // 🎯 新增：儲存軟體版本號
+
+  RealtimeChannel? _profileChannel; 
 
   @override
   void initState() {
     super.initState();
+    
+    final now = DateTime.now();
+    _currentTimeStr = "${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
+    _initPackageInfo(); // 🎯 新增：初始化時讀取版本號
     _fetchUserProfile(); 
     _initLoginTimer(); 
-    _setupProfileSubscription(); // 🎯 新增：啟動權限監聽
+    _setupProfileSubscription(); 
 
     if (GlobalDeviceState.deviceId != null) {
       _selectedDeviceDbId = GlobalDeviceState.deviceId;
@@ -52,7 +63,24 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
   }
 
-  // 🎯 新增：監聽當前使用者的 Profile 變化 (包含權限被降級)
+  // 🎯 新增：讀取 App 版本資訊的函式
+  Future<void> _initPackageInfo() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = 'v${info.version} (Build ${info.buildNumber})'; 
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _appVersion = '版本讀取失敗';
+        });
+      }
+    }
+  }
+
   void _setupProfileSubscription() {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -75,8 +103,8 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 _isAdmin = _userRole.contains('系統管理員') || _userRole == 'admin';
                 _isRoot = _userRole == '系統管理員(root)';
                 _avatarUrl = payload.newRecord['avatar_url'];
+                _nickname = payload.newRecord['nickname'] ?? '使用者';
 
-                // 🛡️ 安全防護：如果使用者原本停留在「進階功能」頁面卻被降級，強制將他踢回「設備列表」
                 if (!_isAdmin && _selectedIndex == 2) {
                   _selectedIndex = 0;
                 }
@@ -96,13 +124,17 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
 
     _loginTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final now = DateTime.now();
+      final timeStr = "${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
       if (_loginTime != null && mounted) {
-        final diff = DateTime.now().difference(_loginTime!);
+        final diff = now.difference(_loginTime!);
         final h = diff.inHours.toString().padLeft(2, '0');
         final m = (diff.inMinutes % 60).toString().padLeft(2, '0');
         final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
         setState(() {
           _loginDurationStr = '$h:$m:$s';
+          _currentTimeStr = timeStr; 
         });
       }
     });
@@ -114,7 +146,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     try {
       final data = await Supabase.instance.client
           .from('profiles')
-          .select('role, avatar_url')
+          .select('role, avatar_url, nickname') 
           .eq('id', user.id)
           .maybeSingle();
       if (data != null && mounted) {
@@ -123,6 +155,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
           _isAdmin = _userRole.contains('系統管理員') || _userRole == 'admin';
           _isRoot = _userRole == '系統管理員(root)'; 
           _avatarUrl = data['avatar_url'];
+          _nickname = data['nickname'] ?? '使用者';
         });
       }
     } catch(e) {
@@ -130,10 +163,22 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
   }
 
+  Future<void> _handleLogout() async {
+    GlobalDeviceState.clear();
+    await logUserAction('登出', details: '使用者自 網頁版管理平台 登出');
+    await Supabase.instance.client.auth.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const RootScreen()),
+        (route) => false,
+      );
+    }
+  }
+
   @override
   void dispose() {
     _loginTimer?.cancel(); 
-    _profileChannel?.unsubscribe(); // 🎯 新增：釋放監聽頻道
+    _profileChannel?.unsubscribe(); 
     if (_selectedDeviceDbId != null) {
       GlobalDeviceState.needsNarrowPush = true;
     }
@@ -153,7 +198,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
             bottom: 0,
             right: 0,
             child: Container(
-              color: (_selectedIndex == 1 || _selectedIndex == 2) ? Colors.white : Colors.grey.shade100,
+              color: (_selectedIndex == 1 || _selectedIndex == 2 || _selectedIndex == 3) ? Colors.white : Colors.grey.shade100, 
               child: _buildRightPanelContent(), 
             ),
           ),
@@ -178,7 +223,11 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 children: [
                   const SizedBox(height: 40),
                   const Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 4),
+                  // 🎯 新增：顯示軟體版本號
+                  Text(_appVersion, style: const TextStyle(color: Colors.tealAccent, fontSize: 11, letterSpacing: 0.5, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 32),
+                  
                   ListTile(
                     leading: Icon(Icons.dashboard, color: _selectedIndex == 0 ? Colors.tealAccent : Colors.white),
                     title: Text('設備列表', style: TextStyle(color: _selectedIndex == 0 ? Colors.tealAccent : Colors.white)),
@@ -214,40 +263,90 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                   const Spacer(), 
                   const Divider(color: Colors.white24, height: 1),
                   
-                  ListTile(
-                    leading: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: Colors.white24,
-                      backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
-                      child: _avatarUrl == null ? const Icon(Icons.person, size: 20, color: Colors.white) : null,
-                    ),
-                    title: Text(userEmail, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 4),
-                        Text(_userRole, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                        const SizedBox(height: 2),
-                        Text('已登入時間: $_loginDurationStr', style: const TextStyle(color: Colors.tealAccent, fontSize: 10)),
+                  Material(
+                    color: _selectedIndex == 3 ? Colors.white.withValues(alpha: 0.15) : Colors.transparent,
+                    child: PopupMenuButton<String>(
+                      offset: const Offset(0, -115), // 🎯 搭配下方 position 讓選單由下往上展開
+                      position: PopupMenuPosition.over,
+                      color: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      onSelected: (value) async {
+                        if (value == 'profile') {
+                          setState(() {
+                            _selectedIndex = 3; 
+                            _selectedDeviceDbId = null;
+                            GlobalDeviceState.clear();
+                          });
+                        } else if (value == 'logout') {
+                          await _handleLogout();
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'profile',
+                          child: Row(
+                            children: [
+                              Icon(Icons.person_rounded, color: Colors.teal, size: 20),
+                              SizedBox(width: 8),
+                              Text('關於我', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem(
+                          value: 'logout',
+                          child: Row(
+                            children: [
+                              Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+                              SizedBox(width: 8),
+                              Text('登出系統', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
                       ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 16,
+                              backgroundColor: Colors.white24,
+                              backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
+                              child: _avatarUrl == null ? const Icon(Icons.person, size: 20, color: Colors.white) : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(userEmail, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 4),
+                                  Text(_userRole, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                                  const SizedBox(height: 2),
+                                  Text('已登入時間: $_loginDurationStr', style: const TextStyle(color: Colors.tealAccent, fontSize: 10)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.logout, color: Colors.redAccent),
-                    title: const Text('登出系統', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                    onTap: () async {
-                      GlobalDeviceState.clear();
-                      await logUserAction('登出', details: '使用者自 網頁版管理平台 登出');
-                      await Supabase.instance.client.auth.signOut();
-                      if (context.mounted) {
-                        Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (context) => const RootScreen()),
-                          (route) => false,
-                        );
-                      }
-                    },
+
+                  const Divider(color: Colors.white24, height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      _currentTimeStr,
+                      style: const TextStyle(
+                        color: Colors.white54, 
+                        fontSize: 11, 
+                        letterSpacing: 1.5,
+                        fontFamily: 'Courier', 
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 4),
                 ],
               ),
             ),
@@ -258,6 +357,16 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   }
 
   Widget _buildRightPanelContent() {
+    if (_selectedIndex == 3) {
+      return ProfileScreen(
+        nickname: _nickname,
+        accountType: _userRole,
+        userEmail: Supabase.instance.client.auth.currentUser?.email ?? '',
+        avatarUrl: _avatarUrl,
+        onLogout: _handleLogout,
+        onProfileDataChanged: _fetchUserProfile, 
+      );
+    }
     if (_selectedIndex == 2 && _isAdmin) {
       return _buildAdvancedFeaturesView(); 
     }
@@ -808,7 +917,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                               child: ListView.separated(
                                 padding: EdgeInsets.zero,
                                 itemCount: adminList.length,
-                                // 🎯 修正: 避免使用雙底線，改用正確命名的參數
                                 separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black12),
                                 itemBuilder: (context, index) {
                                   final admin = adminList[index];
@@ -1063,6 +1171,10 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                                   final timeStr = "${time.year}/${time.month.toString().padLeft(2,'0')}/${time.day.toString().padLeft(2,'0')} ${time.hour.toString().padLeft(2,'0')}:${time.minute.toString().padLeft(2,'0')}";
                                   
                                   return ListTile(
+                                    onTap: () {
+                                      titleController.text = b['title'] ?? '';
+                                      bodyController.text = b['message'] ?? '';
+                                    },
                                     tileColor: index.isEven ? Colors.white : Colors.grey.shade50,
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                                     title: Text(b['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -1713,15 +1825,27 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
   
   final List<String> _terminalLines = [];
   MqttClient? _mqttClient;
+  
+  StreamSubscription<AuthState>? _authStateSubscription;
 
   @override
   void initState() {
     super.initState();
     _appendToTerminal('[系統] 等待輸入逆變器序號並建立連線...');
+    
+    _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.signedOut) {
+        _mqttClient?.disconnect();
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _authStateSubscription?.cancel(); 
     _commandController.dispose();
     _scrollController.dispose();
     _mqttClient?.disconnect(); 
@@ -1777,7 +1901,7 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
       _connectedSn = targetSn;
     });
     
-    _appendToTerminal('[系統] 正在建立 MQTT 直連至設備 $targetSn...');
+     _appendToTerminal('[系統] 正在與設備「$targetSn」建立連線中...');
 
     final clientId = 'flutter_admin_${DateTime.now().millisecondsSinceEpoch}';
     
@@ -1802,7 +1926,7 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
           _isConnected = true;
           _isConnecting = false;
         });
-        _appendToTerminal('[系統] ✅ 已成功連線並訂閱主題: $topic');
+        _appendToTerminal('[系統] ✅ 已成功連線至設備「$targetSn」');
 
         _mqttClient!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
           final recMess = c![0].payload as MqttPublishMessage;
@@ -1838,7 +1962,7 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
         _isConnecting = false;
         _isConnected = false;
       });
-      _appendToTerminal('[系統] ❌ MQTT 連線失敗: $e');
+      _appendToTerminal('[系統] ❌ 設備連線失敗: $e');
     }
   }
 
@@ -1890,9 +2014,9 @@ class _RemoteDiagnosticsDialogState extends State<RemoteDiagnosticsDialog> {
       final commandTopic = 'inverter/command/$_connectedSn';
       _mqttClient!.publishMessage(commandTopic, MqttQos.atMostOnce, builder.payload!);
       
-      _appendToTerminal('[系統] 📡 指令已透過 MQTT 直連發送，等待設備回傳...');
+      _appendToTerminal('[系統] 📡 指令已發送，等待設備回傳...');
     } catch (e) {
-      _appendToTerminal('[系統] ❌ MQTT 指令發送失敗: $e');
+      _appendToTerminal('[系統] ❌ 指令發送失敗: $e');
     } finally {
       setState(() => _isSending = false);
       _commandController.clear(); 

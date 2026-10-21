@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; 
@@ -57,12 +56,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;
-      final File file = File(image.path);
+      
+      // 🎯 修正：使用 readAsBytes() 讀取圖片位元組，完美相容 Web 與 APP
+      final Uint8List fileBytes = await image.readAsBytes(); 
       final String fileName = '${user.id}.jpg';
-      await Supabase.instance.client.storage.from('avatars').upload(
+      
+      // 🎯 修正：改用 uploadBinary 來上傳 Byte 資料，並指定 contentType
+      await Supabase.instance.client.storage.from('avatars').uploadBinary(
         fileName,
-        file,
-        fileOptions: const FileOptions(cacheControl: '0', upsert: true),
+        fileBytes,
+        fileOptions: const FileOptions(cacheControl: '0', upsert: true, contentType: 'image/jpeg'),
       );
       final String publicUrl = Supabase.instance.client.storage.from('avatars').getPublicUrl(fileName);
       await Supabase.instance.client.from('profiles').update({'avatar_url': publicUrl}).eq('id', user.id);

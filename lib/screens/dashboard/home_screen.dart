@@ -12,6 +12,7 @@ import '../../widgets/chart_painters.dart';
 import '../../widgets/weather_renderer.dart'; 
 import '../settings_screens.dart';
 import '../device_info_settings_screen.dart';
+import '../tou_settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String timeString; 
@@ -900,7 +901,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     );
   }
 
-  Widget _buildTouSettingsContent(bool isEffectivelyBackup, bool isSeason, int startM, int endM) {
+  // 🎯 修改：加入 context 參數，以便後續點擊跳轉
+  Widget _buildTouSettingsContent(BuildContext context, bool isEffectivelyBackup, bool isSeason, int startM, int endM) {
     Widget buildSlot(String title, Map<String, dynamic>? slot) {
       if (slot == null) return const SizedBox.shrink();
       int state = slot['state'] ?? 0;
@@ -928,30 +930,70 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (isEffectivelyBackup) ...[
-          Text(
-            _isStormBackupMode ? '惡劣天氣備援模式' : '全天候備援模式', 
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade700)
-          ),
-          buildSlot('時段 1', {'state': 1, 'start': '00:00', 'end': '00:00'}),
-          buildSlot('時段 2', {'state': 1, 'start': '00:00', 'end': '00:00'}),
-        ] else if (isSeason) ...[
-          Text('夏月排程 ($startM月~$endM月)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange)),
-          buildSlot('時段 1', _touSettings!['summerSlot0']),
-          buildSlot('時段 2', _touSettings!['summerSlot1']),
-          const SizedBox(height: 10),
-          const Text('非夏月排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
-          buildSlot('時段 1', _touSettings!['winterSlot0']),
-          buildSlot('時段 2', _touSettings!['winterSlot1']),
-        ] else ...[
-          const Text('全年排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
-          buildSlot('時段 1', _touSettings!['winterSlot0']),
-          buildSlot('時段 2', _touSettings!['winterSlot1']),
-        ]
-      ],
+    // 🎯 新增：用 InkWell 包裝整個內容，並設定點擊事件跳轉至 TouSettingsScreen
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () async {
+          // 判斷是否為管理員或擁有者 (使用與首頁地圖跳轉相同的邏輯)
+          bool isRootOrOwner = false;
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user != null) {
+            try {
+              final data = await Supabase.instance.client
+                  .from('devices')
+                  .select('user_id')
+                  .eq('id', widget.deviceDbId)
+                  .maybeSingle();
+                  
+              if (data != null) {
+                isRootOrOwner = (data['user_id'] == user.id) || 
+                                widget.accountType == '系統管理員(root)';
+              }
+            } catch (_) {}
+          }
+
+          if (!context.mounted) return;
+          
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TouSettingsScreen(
+                deviceDbId: widget.deviceDbId,
+                isRootOrOwner: isRootOrOwner,
+              ),
+            ),
+          );
+          
+          // 🎯 返回時重新讀取資料，確保首頁顯示最新的排程
+          _fetchRealLocationAndWeather();
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isEffectivelyBackup) ...[
+              Text(
+                _isStormBackupMode ? '惡劣天氣備援模式' : '全天候備援模式', 
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade700)
+              ),
+              buildSlot('時段 1', {'state': 1, 'start': '00:00', 'end': '00:00'}),
+              buildSlot('時段 2', {'state': 1, 'start': '00:00', 'end': '00:00'}),
+            ] else if (isSeason) ...[
+              Text('夏月排程 ($startM月~$endM月)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange)),
+              buildSlot('時段 1', _touSettings!['summerSlot0']),
+              buildSlot('時段 2', _touSettings!['summerSlot1']),
+              const SizedBox(height: 10),
+              const Text('非夏月排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+              buildSlot('時段 1', _touSettings!['winterSlot0']),
+              buildSlot('時段 2', _touSettings!['winterSlot1']),
+            ] else ...[
+              const Text('全年排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
+              buildSlot('時段 1', _touSettings!['winterSlot0']),
+              buildSlot('時段 2', _touSettings!['winterSlot1']),
+            ]
+          ],
+        ),
+      ),
     );
   }
 
@@ -1005,12 +1047,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             const Divider(height: 1, color: Colors.black12),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              // 🎯 將 Padding 移除，交給內部的 _buildTouSettingsContent 處理，確保波紋填滿
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.4),
                 borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
               ),
-              child: _buildTouSettingsContent(isEffectivelyBackup, isSeason, startM, endM),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: _buildTouSettingsContent(context, isEffectivelyBackup, isSeason, startM, endM), // 🎯 傳入 context
+              ),
             ),
           ],
         ),
@@ -1512,7 +1557,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                                             }
                                           }
                                           final bool isEffectivelyBackup = _isStormBackupMode || isManualBackup;
-                                          return _buildTouSettingsContent(isEffectivelyBackup, isSeason, startM, endM);
+                                          // 🎯 補上第一個參數 context
+                                          return _buildTouSettingsContent(context, isEffectivelyBackup, isSeason, startM, endM);
                                         }
                                       ),
                                     ],
