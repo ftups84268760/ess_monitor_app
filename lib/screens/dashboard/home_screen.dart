@@ -103,12 +103,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   bool _isTyphoonWarning = false; // 🎯 紀錄是否處於颱風警報狀態
 
   // 🎯 判斷當前天氣是否為深色背景，以此切換文字顏色 (包含颱風)
+  // 🎯 判斷當前是否為「深色背景」：包含惡劣天氣，或進入夜晚時段 (18:00 ~ 06:00)
   bool get _isDarkWeather {
+    final hour = DateTime.now().hour;
+    final bool isNightTime = hour >= 17 || hour < 6;
+
     final condition = _getWeatherCondition(_currentWeatherCode);
-    return condition == WeatherCondition.thunderstorm ||
+    final bool isDarkWeatherCondition = 
+           condition == WeatherCondition.thunderstorm ||
            condition == WeatherCondition.typhoon ||
            condition == WeatherCondition.rainy ||
-           condition == WeatherCondition.cloudy;
+           condition == WeatherCondition.cloudy ||
+           condition == WeatherCondition.snow; // 下雪也順便加上
+
+    // 只要是晚上「或」惡劣天氣，就自動切換成淺色反白文字！
+    return isNightTime || isDarkWeatherCondition;
   }
 
   String _formatPower(double? watts) {
@@ -197,7 +206,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         if (mounted) {
           _fetchRealLocationAndWeather();
           _fetchTelemetryDataFromSupabase();
-          _fetchBatteries(); 
+          _fetchBatteries();
+          _setupRealtimeSubscription(); 
         }
       });
       
@@ -494,17 +504,41 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     final String sn = widget.inverterSn;
     if (sn.isEmpty) return;
 
-    _psChannel?.unsubscribe();
-    _psChannel = Supabase.instance.client.channel('public:telemetry_inv_ps:device_id=eq.$sn');
-    _psChannel!.onPostgresChanges(event: PostgresChangeEvent.insert, schema: 'public', table: 'telemetry_inv_ps', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'device_id', value: sn), callback: (payload) {
-      if (mounted) setState(() { _updatePsData(payload.newRecord); });
-    }).subscribe();
+    // 🎯 確保先關閉舊的連線，避免重複訂閱導致記憶體洩漏
+    await _psChannel?.unsubscribe();
+    await _testChannel?.unsubscribe();
 
-    _testChannel?.unsubscribe();
-    _testChannel = Supabase.instance.client.channel('public:telemetry_test:device_id=eq.$sn');
-    _testChannel!.onPostgresChanges(event: PostgresChangeEvent.insert, schema: 'public', table: 'telemetry_test', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'device_id', value: sn), callback: (payload) {
-      if (mounted) setState(() { _updateTestData(payload.newRecord); });
-    }).subscribe();
+    // 🎯 1. 簡化頻道名稱
+    _psChannel = Supabase.instance.client.channel('ps_channel_$sn');
+    _psChannel!.onPostgresChanges(
+      event: PostgresChangeEvent.insert, 
+      schema: 'public', 
+      table: 'telemetry_inv_ps', 
+      filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'device_id', value: sn), 
+      callback: (payload) {
+        debugPrint('⚡ 收到推播 (InvPs) ID: ${payload.newRecord['id']}');
+        if (mounted) setState(() { _updatePsData(payload.newRecord); });
+      }
+    ).subscribe((status, [error]) {
+      // 🎯 2. 加入狀態監聽，在 VS Code 終端機能清楚看到是 SUBSCRIBED 還是 CLOSED
+      debugPrint('📡 InvPs Realtime 狀態: $status');
+      if (error != null) debugPrint('⚠️ InvPs Realtime 錯誤: $error');
+    });
+
+    _testChannel = Supabase.instance.client.channel('test_channel_$sn');
+    _testChannel!.onPostgresChanges(
+      event: PostgresChangeEvent.insert, 
+      schema: 'public', 
+      table: 'telemetry_test', 
+      filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'device_id', value: sn), 
+      callback: (payload) {
+        debugPrint('⚡ 收到推播 (Test) ID: ${payload.newRecord['id']}');
+        if (mounted) setState(() { _updateTestData(payload.newRecord); });
+      }
+    ).subscribe((status, [error]) {
+      debugPrint('📡 Test Realtime 狀態: $status');
+      if (error != null) debugPrint('⚠️ Test Realtime 錯誤: $error');
+    });
   }
 
   void _updatePsData(Map<String, dynamic> data) {
@@ -1239,8 +1273,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                     Builder(
                       builder: (context) {
                         final bool isDarkEnv = _isDarkWeather;
-                        // 針對淺色晴天背景加深次要文字 (black87)，強光對比度優化 (teal.shade800)
+                        // 🎯 這裡控制了文字顏色！
+                        // 如果是深色背景 (isDarkEnv為true)，字體變成 white70；否則為 black87
                         final Color subTextColor = isDarkEnv ? Colors.white70 : Colors.black87;
+                        // 如果是深色背景 (isDarkEnv為true)，強調色變成 orangeAccent；否則為 teal.shade800
                         final Color highlightColor = isDarkEnv ? Colors.orangeAccent : Colors.teal.shade800;
 
                         return Row(
@@ -1250,8 +1286,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [                         
+                                // 🎯 日期文字
                                 Text(_getDateHeaderString(), style: TextStyle(fontSize: 10, color: subTextColor, fontWeight: FontWeight.bold)),
                                 const SizedBox(height: 2),
+                                // 🎯 最後更新時間
                                 Text('最後更新: $_lastUpdateTime', style: TextStyle(fontSize: 9, color: highlightColor, fontWeight: FontWeight.w600)),
                               ],
                             ),

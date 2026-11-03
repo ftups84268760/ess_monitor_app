@@ -18,6 +18,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart'; 
 import 'package:home_widget/home_widget.dart';
 import 'widgets/web_session_timeout_listener.dart';
+import 'screens/settings_screens.dart'; // 🎯 引入跳轉目標頁面
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -113,6 +114,43 @@ class _RootScreenState extends State<RootScreen> {
   void initState() {
     super.initState();
     _initializeAppAndCheckLogin();
+    _setupPushNotificationRouting(); // 🎯 初始化路由攔截
+  }
+
+  // 🎯 處理推播點擊的路由跳轉邏輯
+  void _setupPushNotificationRouting() {
+    // 情境 A：APP 完全關閉時 (冷啟動)，點擊推播喚醒 APP
+    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+      if (message != null) {
+        // 需延遲等待登入狀態與首頁渲染完成，避免 Context 尚未就緒
+        Future.delayed(const Duration(milliseconds: 2500), () {
+          _handlePushClick(message);
+        });
+      }
+    });
+
+    // 情境 B：APP 正在背景運作時，點擊推播喚醒
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _handlePushClick(message);
+    });
+  }
+
+  // 🎯 解析推播 payload 並執行跳轉
+  void _handlePushClick(RemoteMessage message) {
+    if (message.data['route'] == 'weather_forecast') {
+      final String? deviceDbId = message.data['deviceDbId'];
+      
+      if (deviceDbId != null && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => WeatherForecastScreen(
+              deviceDbId: deviceDbId,
+              isRootOrOwner: true, 
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _setupAndUploadFcmToken() async {
@@ -247,7 +285,7 @@ class _RootScreenState extends State<RootScreen> {
                 const SizedBox(height: 16),
                 const Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 2)),
                 const SizedBox(height: 8),
-                const Text('管理後台載入中', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                const Text('雲端平台載入中', style: TextStyle(color: Colors.white70, fontSize: 14)),
                 const SizedBox(height: 40),
                 SizedBox(
                   width: 300,

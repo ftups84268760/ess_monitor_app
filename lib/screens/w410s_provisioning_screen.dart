@@ -22,6 +22,58 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
   String _provisioningStatusText = '等待開始...';
   bool _isPinging = false; // 🎯 新增：紀錄是否正在測試連線中
 
+  // 🎯 新增 1：儲存手機本機 IP 的變數
+  String _localIpAddress = '讀取中...';
+
+  // 🎯 新增 2：在初始化時自動抓取手機 IP
+  @override
+  void initState() {
+    super.initState();
+    _fetchLocalIpAddress();
+  }
+
+  // 🎯 新增 3：抓取本機 Wi-Fi IP 的實作邏輯
+  Future<void> _fetchLocalIpAddress() async {
+    try {
+      // 列出所有網路介面
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+      
+      String? wifiIp;
+      
+      for (var interface in interfaces) {
+        // 在 Android/iOS 上，Wi-Fi 介面名稱通常包含 'wlan', 'en0', 'ap'
+        if (interface.name.contains('wlan') || 
+            interface.name.contains('en0') || 
+            interface.name.contains('ap')) {
+          wifiIp = interface.addresses.first.address;
+          break;
+        }
+      }
+      
+      // 如果找不到特定名稱，就拿第一個非回播(loopback)的 IPv4 位址
+      if (wifiIp == null && interfaces.isNotEmpty) {
+        wifiIp = interfaces.first.addresses.first.address;
+      }
+
+      if (mounted) {
+        setState(() {
+          _localIpAddress = wifiIp ?? '未連接網路';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _localIpAddress = '無法取得 IP';
+        });
+      }
+      debugPrint('取得本機 IP 失敗: $e');
+    }
+  }
+
+
   /// 🎯 新增：檢查逆變器 SN 是否已經存在於資料庫
   Future<bool> _checkIfDeviceExists(String inverterSn) async {
     try {
@@ -496,7 +548,7 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
           child: const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('設備雲端註冊說明：', style: TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+              Text('設備註冊說明：', style: TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.bold)),
               SizedBox(height: 6),
               Text('逆變器透過DTU，將序號(SN)寫入雲端資料庫進行註冊。', style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.5)),
             ],
@@ -555,21 +607,45 @@ class _W410sProvisioningScreenState extends State<W410sProvisioningScreen> {
         
         // 🎯 新增這段：右下角的 DTU 連線測試按鈕
         const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.orangeAccent,
-              side: const BorderSide(color: Colors.orangeAccent),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        // 🎯 修改這段：用 Row 並排顯示手機 IP 與測試按鈕
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // 顯示手機 IP 區塊
+            const Icon(Icons.phone_android_rounded, size: 14, color: Colors.white54),
+            const SizedBox(width: 4),
+            const Text('手機IP: ', style: TextStyle(fontSize: 12, color: Colors.white54)),
+            Text(
+              _localIpAddress, 
+              style: const TextStyle(fontSize: 12, color: Colors.tealAccent, fontWeight: FontWeight.bold)
             ),
-            onPressed: _isPinging ? null : _testDtuConnection,
-            icon: _isPinging 
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.orangeAccent, strokeWidth: 2))
-                : const Icon(Icons.wifi_find_rounded, size: 18),
-            label: Text(_isPinging ? '測試中...' : 'DTU連線測試', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          ),
+            // 點擊重新抓取 IP 的小按鈕
+            InkWell(
+              onTap: _fetchLocalIpAddress,
+              borderRadius: BorderRadius.circular(12),
+              child: const Padding(
+                padding: EdgeInsets.all(4.0),
+                child: Icon(Icons.refresh_rounded, size: 14, color: Colors.white70),
+              ),
+            ),
+            
+            const Spacer(), // 將按鈕推到最右邊
+            
+            // 原本的 DTU連線測試 按鈕
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.orangeAccent,
+                side: const BorderSide(color: Colors.orangeAccent),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              onPressed: _isPinging ? null : _testDtuConnection,
+              icon: _isPinging 
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.orangeAccent, strokeWidth: 2))
+                  : const Icon(Icons.wifi_find_rounded, size: 18),
+              label: Text(_isPinging ? '測試中...' : 'DTU連線測試', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
         
         const Spacer(),

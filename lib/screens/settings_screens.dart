@@ -104,7 +104,7 @@ class _SettingsSubMenuScreenState extends State<SettingsSubMenuScreen> {
                   : ListView(
                       padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
                       children: [
-                        _buildSubMenuTile(context, Icons.tsunami_outlined, '惡劣天氣預測', WeatherForecastScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
+                        _buildSubMenuTile(context, Icons.tsunami_outlined, '惡劣天氣提醒', WeatherForecastScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
                         _buildSubMenuTile(context, Icons.schedule, '時間電價(TOU)排程', TouSettingsScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
                         _buildSubMenuTile(context, Icons.hourglass_bottom_rounded, '電價方案', ElectricityTariffScreen(deviceDbId: widget.deviceDbId, isRootOrOwner: _isRootOrOwner)),
                         
@@ -949,7 +949,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                               SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
                                 dense: true,
-                                title: const Text('惡劣天氣預測提醒', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal)),
+                                title: const Text('惡劣天氣提醒', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal)),
                                 subtitle: Text(GlobalState.isBackupProtectionEnabled ? '已開啟' : '已關閉', style: const TextStyle(fontSize: 12, color: Colors.black54)),
                                 activeThumbColor: Colors.white,
                                 activeTrackColor: Colors.teal,
@@ -969,7 +969,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                                     SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
-                                        '當您啟用「惡劣天氣備援模式」，系統將暫停您的時間電價(TOU)排程，並盡可能將電池維持在高儲備量狀態',
+                                        '啟用「惡劣天氣備援模式」，系統將暫停時間電價(TOU)排程並開始對電池進行充電，盡可能將電池維持在高儲備量狀態',
                                         style: TextStyle(fontSize: 11, color: Colors.black87, height: 1.4, fontWeight: FontWeight.w600),
                                       ),
                                     ),

@@ -102,7 +102,8 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 _userRole = newRole;
                 _isAdmin = _userRole.contains('系統管理員') || _userRole == 'admin';
                 _isRoot = _userRole == '系統管理員(root)';
-                _avatarUrl = payload.newRecord['avatar_url'];
+                final fetchedUrl = payload.newRecord['avatar_url'];
+                _avatarUrl = fetchedUrl != null ? '$fetchedUrl?v=${DateTime.now().millisecondsSinceEpoch}' : null;
                 _nickname = payload.newRecord['nickname'] ?? '使用者';
 
                 if (!_isAdmin && _selectedIndex == 2) {
@@ -154,7 +155,8 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
           _userRole = data['role'] ?? '一般使用者';
           _isAdmin = _userRole.contains('系統管理員') || _userRole == 'admin';
           _isRoot = _userRole == '系統管理員(root)'; 
-          _avatarUrl = data['avatar_url'];
+          final fetchedUrl = data['avatar_url'];
+          _avatarUrl = fetchedUrl != null ? '$fetchedUrl?v=${DateTime.now().millisecondsSinceEpoch}' : null;
           _nickname = data['nickname'] ?? '使用者';
         });
       }

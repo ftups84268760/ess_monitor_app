@@ -1045,7 +1045,7 @@ class _BatteryParameterSettingsScreenState extends State<BatteryParameterSetting
                         activeColor: Colors.teal,
                         onChanged: (v) => setState(() => _maxAcChargeCurrent = v),
                         leftLabelBuilder: (v) => '$v A',
-                        rightLabelBuilder: (v) => '最大 100 A',
+                        rightLabelBuilder: (v) => '100 A (Max.)',
                       ),
                       
                       SizedBox(

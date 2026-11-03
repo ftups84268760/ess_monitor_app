@@ -41,26 +41,27 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   final TextEditingController _nameInputController = TextEditingController();
 
   RealtimeChannel? _realtimeChannel;
-  RealtimeChannel? _profileChannel; // 🎯 新增：讓元件自己監聽身分變化
+  RealtimeChannel? _profileChannel;
+  RealtimeChannel? _alarmChannel; // 🎯 新增：監聽全域告警
   StreamSubscription<AuthState>? _authStateSubscription;
 
   String _filterMode = '全部'; 
-  String _localAccountType = ''; // 🎯 新增：內部獨立維護的權限狀態
+  String _localAccountType = ''; 
   
   bool _isLoading = true;
-  List<Map<String, dynamic>> _devices = [];
+  List _devices = [];
 
   @override
   void initState() {
     super.initState();
-    _localAccountType = widget.accountType; // 初始化本地權限
+    _localAccountType = widget.accountType;
     
     WidgetsBinding.instance.addObserver(this);
     _setupRealtimeSubscription();
-    _setupProfileSubscription(); // 啟動身分監聽
+    _setupProfileSubscription();
+    _setupAlarmRealtimeSubscription();
     _fetchData(); 
 
-    // 監聽 Auth 狀態，解決 Web 端剛登入或重整時的空窗期
     _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
       if (event == AuthChangeEvent.initialSession || event == AuthChangeEvent.signedIn) {
@@ -75,7 +76,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     });
   }
 
-  // 🎯 監聽上層 Widget 傳入的屬性變化 (作為備援)
   @override
   void didUpdateWidget(DeviceListScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -87,7 +87,24 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     }
   }
 
-  // 🎯 新增：自己監聽資料庫 Profile 的權限變化，完全不依賴外框！
+  void _setupAlarmRealtimeSubscription() {
+    _alarmChannel = Supabase.instance.client
+        .channel('public:device_alarms_list')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all, 
+          schema: 'public',
+          table: 'device_alarms',
+          callback: (payload) {
+            if (mounted) {
+              debugPrint('⚠️ 偵測到告警狀態變更，即時更新設備列表');
+              // 因為告警牽涉到多個錯誤代碼的陣列重組，直接觸發整頁靜默刷新最安全
+              _reloadDeviceList();
+            }
+          },
+        )
+        .subscribe();
+  }
+
   void _setupProfileSubscription() {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -105,7 +122,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           callback: (payload) {
             if (mounted) {
               final newRole = payload.newRecord['role'] ?? '一般使用者';
-              // 當發現資料庫裡的權限跟自己目前的不一樣時，強制觸發更新
               if (_localAccountType != newRole) {
                 debugPrint('🔄 設備列表內部偵測到權限變更: $_localAccountType -> $newRole');
                 setState(() {
@@ -130,7 +146,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
             isInverterOnline: GlobalDeviceState.isOnline,
             deviceDbId: GlobalDeviceState.deviceId!,
             inverterSn: GlobalDeviceState.sn,
-            accountType: _localAccountType, // 🎯 改用內部權限
+            accountType: _localAccountType, 
             isPushedFullScreen: true,
           ),
         ),
@@ -143,41 +159,48 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   }
 
   void _setupRealtimeSubscription() {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
 
-    _realtimeChannel = Supabase.instance.client
-        .channel('public:devices')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all, 
-          schema: 'public',
-          table: 'devices',
-          callback: (payload) {
-            if (payload.eventType == PostgresChangeEvent.update) {
-              final newRecord = payload.newRecord;
-              if (newRecord.isNotEmpty && mounted) {
-                setState(() {
-                  final index = _devices.indexWhere((d) => d['id'].toString() == newRecord['id'].toString());
-                  if (index != -1) {
-                    final bool currentFault = _devices[index]['has_active_fault'] ?? false;
-                    final int? currentSoc = _devices[index]['battery_soc'];
-                    final int? currentPwrDir = _devices[index]['battery_power_dir'];
-                    
-                    _devices[index] = {..._devices[index], ...newRecord};
-                    _devices[index]['has_active_fault'] = currentFault;
-                    _devices[index]['battery_soc'] = currentSoc;
-                    _devices[index]['battery_power_dir'] = currentPwrDir;
-                  }
-                });
-              }
-            } 
-            else if (payload.eventType == PostgresChangeEvent.insert || payload.eventType == PostgresChangeEvent.delete) {
-              _reloadDeviceList();
+  _realtimeChannel = Supabase.instance.client
+      .channel('public:devices')
+      .onPostgresChanges(
+        event: PostgresChangeEvent.all, 
+        schema: 'public',
+        table: 'devices',
+        callback: (payload) {
+          if (payload.eventType == PostgresChangeEvent.update) {
+            final newRecord = payload.newRecord;
+            if (newRecord.isNotEmpty && mounted) {
+              setState(() {
+                final index = _devices.indexWhere((d) => d['id'].toString() == newRecord['id'].toString());
+                if (index != -1) {
+                  final bool currentFault = _devices[index]['has_active_fault'] ?? false;
+                  final List<String> currentCodes = _devices[index]['fault_codes'] ?? <String>[];
+                  final int? currentSoc = _devices[index]['battery_soc'];
+                  final int? currentPwrDir = _devices[index]['battery_power_dir'];
+                  
+                  // 🎯 修正：強制轉換型別為 Map<String, dynamic>
+                  _devices[index] = Map<String, dynamic>.from({
+                    ..._devices[index], 
+                    ...newRecord
+                  });
+                  
+                  _devices[index]['has_active_fault'] = currentFault;
+                  _devices[index]['fault_codes'] = currentCodes;
+                  _devices[index]['battery_soc'] = currentSoc;
+                  _devices[index]['battery_power_dir'] = currentPwrDir;
+                }
+              });
             }
-          },
-        )
-        .subscribe();
-  }
+          } 
+          else if (payload.eventType == PostgresChangeEvent.insert || payload.eventType == PostgresChangeEvent.delete) {
+            _reloadDeviceList();
+          }
+        },
+      )
+      .subscribe();
+}
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -205,12 +228,11 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchUserDevicesFromDatabase() async {
+  Future<List> _fetchUserDevicesFromDatabase() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return [];
 
     try {
-      // 🎯 改用內部權限判斷
       final bool isAdmin = _localAccountType == '系統管理員' || _localAccountType == 'admin' || _localAccountType == '系統管理員(root)';
       List<dynamic> response;
       
@@ -220,7 +242,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
         response = await Supabase.instance.client.rpc('get_accessible_devices');
       }
       
-      List<Map<String, dynamic>> devices = response.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+      List devices = response.map((item) => Map<String, dynamic>.from(item as Map)).toList();
 
       if (devices.isNotEmpty) {
         List<String> snList = devices.map((d) => (d['sn'] ?? '').toString()).where((s) => s.isNotEmpty).toList();
@@ -232,16 +254,24 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
               .eq('is_active', true)
               .inFilter('device_id', snList);
 
-          Set<String> faultedSns = {};
+          Map<String, List<String>> deviceFaultCodes = {};
           for (var row in faultRes) {
+            String sn = row['device_id'].toString();
             String code = (row['alarm_code'] ?? '').toString();
             if (RegExp(r'^[0-9]+$').hasMatch(code)) {
-              faultedSns.add(row['device_id'].toString());
+              if (!deviceFaultCodes.containsKey(sn)) {
+                deviceFaultCodes[sn] = [];
+              }
+              if (!deviceFaultCodes[sn]!.contains(code)) {
+                deviceFaultCodes[sn]!.add(code);
+              }
             }
           }
 
           for (var d in devices) {
-            d['has_active_fault'] = faultedSns.contains(d['sn'].toString());
+            String sn = d['sn'].toString();
+            d['has_active_fault'] = deviceFaultCodes.containsKey(sn);
+            d['fault_codes'] = deviceFaultCodes[sn] ?? <String>[]; 
           }
           
           await Future.wait(devices.map((d) async {
@@ -454,7 +484,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           height: 11,
           padding: const EdgeInsets.all(1.0),
           decoration: BoxDecoration(
-            // 🎯 修改：當充電時外框變成橘色，否則為深灰色
             border: Border.all(color: isCharging ? Colors.orangeAccent : Colors.black54, width: 1.0),
             borderRadius: BorderRadius.circular(2.5),
           ),
@@ -465,7 +494,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                 child: Container(
                   width: 18.0 * (soc / 100.0), 
                   decoration: BoxDecoration(
-                    // 🎯 修改：當充電時進度條也變成橘色
                     color: isCharging ? Colors.orangeAccent : batteryColor,
                     borderRadius: BorderRadius.circular(1.0),
                   ),
@@ -473,7 +501,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
               ),
               if (isCharging)
                 const Center(
-                  // 🎯 修改：將閃電符號顏色設為白色，大小稍微調整讓它更居中清晰
                   child: Icon(Icons.bolt_rounded, size: 9, color: Colors.teal),
                 ),
             ],
@@ -483,7 +510,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
           width: 2.0,
           height: 4,
           decoration: BoxDecoration(
-            // 🎯 修改：當充電時，電池凸起的部分也變成橘色
             color: isCharging ? Colors.orangeAccent : Colors.black54,
             borderRadius: const BorderRadius.horizontal(right: Radius.circular(2)),
           ),
@@ -495,7 +521,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   void dispose() {
     _realtimeChannel?.unsubscribe();
-    _profileChannel?.unsubscribe(); // 🎯 釋放
+    _profileChannel?.unsubscribe(); 
+    _alarmChannel?.unsubscribe();
     _authStateSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -504,7 +531,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final String currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
-    // 🎯 改用內部權限判斷
     final bool isAdmin = _localAccountType == '系統管理員' || _localAccountType == 'admin' || _localAccountType == '系統管理員(root)';
 
     int totalCount = _devices.length;
@@ -606,7 +632,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                 : Builder(
                   builder: (context) {
                     String query = _searchController.text.trim().toLowerCase();
-                    List<Map<String, dynamic>> displayList = _devices.where((device) {
+                    List displayList = _devices.where((device) {
                       final bool online = device['is_online'] ?? true;
                       
                       if (_filterMode == '已連線' && !online) return false;
@@ -704,7 +730,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                         isInverterOnline: online,
                                         deviceDbId: deviceId,
                                         inverterSn: devSn,
-                                        accountType: _localAccountType, // 🎯 改用內部權限
+                                        accountType: _localAccountType,
                                         isPushedFullScreen: true,
                                       ),
                                     ),
@@ -793,30 +819,62 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       crossAxisAlignment: CrossAxisAlignment.end,
                                       children: [
-                                        soc != null
-                                            ? Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                decoration: BoxDecoration(
-                                                  color: isCharging ? Colors.orange.withValues(alpha: 0.1) : Colors.teal.withValues(alpha: 0.05),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                  border: Border.all(color: isCharging ? Colors.orange.withValues(alpha: 0.3) : Colors.teal.withValues(alpha: 0.2)),
-                                                ),
-                                                child: Row(
-                                                  children: [
-                                                    _buildDynamicBatteryIcon(soc, isCharging),
-                                                    const SizedBox(width: 6),
-                                                    Text(
-                                                      '$soc%',
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        fontWeight: FontWeight.bold,
-                                                        color: isCharging ? Colors.orange.shade700 : Colors.teal.shade700,
-                                                      ),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            soc != null
+                                                ? Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                    decoration: BoxDecoration(
+                                                      color: isCharging ? Colors.orange.withValues(alpha: 0.1) : Colors.teal.withValues(alpha: 0.05),
+                                                      borderRadius: BorderRadius.circular(6),
+                                                      border: Border.all(color: isCharging ? Colors.orange.withValues(alpha: 0.3) : Colors.teal.withValues(alpha: 0.2)),
                                                     ),
-                                                  ],
+                                                    child: Row(
+                                                      children: [
+                                                        _buildDynamicBatteryIcon(soc, isCharging),
+                                                        const SizedBox(width: 6),
+                                                        Text(
+                                                          '$soc%',
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: isCharging ? Colors.orange.shade700 : Colors.teal.shade700,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  )
+                                                : const SizedBox.shrink(),
+                                                
+                                            if (hasFault && device['fault_codes'] != null && (device['fault_codes'] as List).isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(left: 6.0),
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.red.withValues(alpha: 0.1),
+                                                    borderRadius: BorderRadius.circular(6),
+                                                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                                                  ),
+                                                  child: Row(
+                                                    children: [
+                                                      const Icon(Icons.error_outline_rounded, size: 14, color: Colors.red),
+                                                      const SizedBox(width: 4),
+                                                      Text(
+                                                        'Error: ${(device['fault_codes'] as List).join(', ')}',
+                                                        style: const TextStyle(
+                                                          fontSize: 12,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.red,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
                                                 ),
-                                              )
-                                            : const SizedBox.shrink(),
+                                              ),
+                                          ],
+                                        ),
 
                                         if (isOwner)
                                           Row(
@@ -888,7 +946,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   }
 }
 
-// ... ManageSharesBottomSheet 和 showReceiveDeviceDialog 保持不變
 class ManageSharesBottomSheet extends StatefulWidget {
   final String deviceDbId;
   final String deviceName;
@@ -902,7 +959,7 @@ class ManageSharesBottomSheet extends StatefulWidget {
 class _ManageSharesBottomSheetState extends State<ManageSharesBottomSheet> {
   bool _isLoading = true;
   bool _isAdding = false;
-  List<Map<String, dynamic>> _sharedUsers = [];
+  List _sharedUsers = [];
   final TextEditingController _emailController = TextEditingController();
 
   @override
