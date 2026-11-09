@@ -196,25 +196,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _startTimers(); 
-      
-      // 🎯 核心修復：延遲 2 秒，給予 iOS/Android 系統足夠的時間喚醒並重連網路
-      // 避免在網路模組還沒 Ready 時瞬間打 API 造成 Supabase 噴出紅色的斷線錯誤
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          _fetchRealLocationAndWeather();
-          _fetchTelemetryDataFromSupabase();
-          _fetchBatteries();
-          _setupRealtimeSubscription(); 
-        }
-      });
-      
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      _stopTimers();  
-    }
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  if (state == AppLifecycleState.resumed) {
+    debugPrint('📱 畫面喚醒：重置網路鎖並重啟更新');
+    _isFetchingTelemetry = false; // 🎯 關鍵修復 1：強制解除可能卡死的 API 請求鎖
+    _startTimers(); 
+    
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        _fetchRealLocationAndWeather();
+        _fetchTelemetryDataFromSupabase();
+        _fetchBatteries();
+        _setupRealtimeSubscription(); 
+      }
+    });
+    
+  } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    debugPrint('📱 畫面鎖定/背景：暫停更新與中斷殭屍連線');
+    _stopTimers();
+    // 🎯 關鍵修復 2：進入背景時主動斷開 Realtime，確保下次喚醒時能乾淨重建
+    _psChannel?.unsubscribe();
+    _testChannel?.unsubscribe();
+    _psChannel = null;
+    _testChannel = null;
   }
+}
 
   @override
   void dispose() {
@@ -504,9 +510,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     final String sn = widget.inverterSn;
     if (sn.isEmpty) return;
 
-    // 🎯 確保先關閉舊的連線，避免重複訂閱導致記憶體洩漏
-    await _psChannel?.unsubscribe();
-    await _testChannel?.unsubscribe();
+    // 🎯 關鍵修復 3：移除 await。直接呼叫 unsubscribe 而不等待，防止整個函式卡死
+    _psChannel?.unsubscribe();
+    _testChannel?.unsubscribe();
 
     // 🎯 1. 簡化頻道名稱
     _psChannel = Supabase.instance.client.channel('ps_channel_$sn');

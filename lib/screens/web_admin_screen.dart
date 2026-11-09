@@ -215,7 +215,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                 gradient: const LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.black, Color(0xFF006400)],
+                  colors: [Colors.black, Colors.teal],
                 ),
                 boxShadow: [
                   BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(8, 0)),

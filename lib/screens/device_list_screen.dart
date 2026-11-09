@@ -43,6 +43,11 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   RealtimeChannel? _realtimeChannel;
   RealtimeChannel? _profileChannel;
   RealtimeChannel? _alarmChannel; // 🎯 新增：監聽全域告警
+
+  // 🎯 新增：用來監聽電池 SOC 與充放電狀態
+  RealtimeChannel? _telemetryTestChannel;
+  RealtimeChannel? _telemetryInvPsChannel;
+
   StreamSubscription<AuthState>? _authStateSubscription;
 
   String _filterMode = '全部'; 
@@ -88,6 +93,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   }
 
   void _setupAlarmRealtimeSubscription() {
+    // 🎯 關鍵防護：直接中斷舊頻道
+    _alarmChannel?.unsubscribe();
+
     _alarmChannel = Supabase.instance.client
         .channel('public:device_alarms_list')
         .onPostgresChanges(
@@ -108,6 +116,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
   void _setupProfileSubscription() {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
+
+    // 🎯 關鍵防護：直接中斷舊頻道
+    _profileChannel?.unsubscribe();
 
     _profileChannel = Supabase.instance.client
         .channel('public:profiles:device_list_${user.id}')
@@ -158,9 +169,13 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     }
   }
 
-  void _setupRealtimeSubscription() {
+void _setupRealtimeSubscription() {
   final user = Supabase.instance.client.auth.currentUser;
   if (user == null) return;
+
+  // ─── 🎯 1. 監聽 devices 資料表 (處理設備上下線、改名與刪除) ───
+  // 關鍵防護：直接中斷舊頻道（不等待回覆），防止死鎖
+  _realtimeChannel?.unsubscribe();
 
   _realtimeChannel = Supabase.instance.client
       .channel('public:devices')
@@ -175,12 +190,12 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
               setState(() {
                 final index = _devices.indexWhere((d) => d['id'].toString() == newRecord['id'].toString());
                 if (index != -1) {
+                  // 保留本地已經抓到的告警與電池狀態，避免被 devices 表的更新蓋掉
                   final bool currentFault = _devices[index]['has_active_fault'] ?? false;
                   final List<String> currentCodes = _devices[index]['fault_codes'] ?? <String>[];
                   final int? currentSoc = _devices[index]['battery_soc'];
                   final int? currentPwrDir = _devices[index]['battery_power_dir'];
                   
-                  // 🎯 修正：強制轉換型別為 Map<String, dynamic>
                   _devices[index] = Map<String, dynamic>.from({
                     ..._devices[index], 
                     ...newRecord
@@ -200,16 +215,86 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
         },
       )
       .subscribe();
+
+  // ─── 🎯 2. 監聽 telemetry_test 以更新電池 SOC ───
+  _telemetryTestChannel?.unsubscribe();
+  
+  _telemetryTestChannel = Supabase.instance.client
+      .channel('public:telemetry_test_list')
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'telemetry_test',
+        callback: (payload) {
+          final newRecord = payload.newRecord;
+          final String sn = (newRecord['device_id'] ?? '').toString();
+          final int? soc = int.tryParse((newRecord['battery_capacity'] ?? '').toString());
+          
+          if (sn.isNotEmpty && soc != null && mounted) {
+            setState(() {
+              final index = _devices.indexWhere((d) => d['sn'].toString() == sn);
+              if (index != -1) {
+                _devices[index]['battery_soc'] = soc;
+              }
+            });
+          }
+        },
+      ).subscribe();
+
+  // ─── 🎯 3. 監聽 telemetry_inv_ps 以更新充放電狀態 ───
+  _telemetryInvPsChannel?.unsubscribe();
+  
+  _telemetryInvPsChannel = Supabase.instance.client
+      .channel('public:telemetry_inv_ps_list')
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'telemetry_inv_ps',
+        callback: (payload) {
+          final newRecord = payload.newRecord;
+          final String sn = (newRecord['device_id'] ?? '').toString();
+          final int? powerDir = int.tryParse((newRecord['battery_power_direction'] ?? '').toString());
+          
+          if (sn.isNotEmpty && powerDir != null && mounted) {
+            setState(() {
+              final index = _devices.indexWhere((d) => d['sn'].toString() == sn);
+              if (index != -1) {
+                _devices[index]['battery_power_dir'] = powerDir;
+              }
+            });
+          }
+        },
+      ).subscribe();
 }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      debugPrint('📱 [設備列表] 畫面喚醒：延遲重建連線與重拉資料');
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
+          // 🎯 喚醒時：重新建立所有被砍掉的連線，並重拉清單
+          _setupRealtimeSubscription();
+          _setupProfileSubscription();
+          _setupAlarmRealtimeSubscription();
           _reloadDeviceList();
         }
       });
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      debugPrint('📱 [設備列表] 畫面鎖定/背景：暫停並中斷殭屍連線');
+    
+      // 🎯 進入背景時：主動斬斷所有 WebSocket 連線，確保下次喚醒是全新連線
+      _realtimeChannel?.unsubscribe();
+      _profileChannel?.unsubscribe();
+      _alarmChannel?.unsubscribe();
+      _telemetryTestChannel?.unsubscribe();
+      _telemetryInvPsChannel?.unsubscribe();
+      _telemetryTestChannel = null;
+      _telemetryInvPsChannel = null;
+    
+      _realtimeChannel = null;
+      _profileChannel = null;
+      _alarmChannel = null;
     }
   }
 
@@ -524,6 +609,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> with WidgetsBinding
     _profileChannel?.unsubscribe(); 
     _alarmChannel?.unsubscribe();
     _authStateSubscription?.cancel();
+    _telemetryTestChannel?.unsubscribe();
+    _telemetryInvPsChannel?.unsubscribe();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
