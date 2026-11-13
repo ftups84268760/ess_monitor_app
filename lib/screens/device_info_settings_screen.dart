@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/constants.dart';
 import '/screens/scanner_screen.dart'; // 🎯 引入現有的掃描元件
 import '../utils/audit_logger.dart';
 
@@ -428,7 +429,7 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('電池模組列表 (${_batteries.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
+            Text('電池模組列表 (${_batteries.length})', style: const TextStyle(fontWeight: FontWeight.normal, color: Colors.teal)),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), padding: const EdgeInsets.symmetric(horizontal: 12), elevation: 0),
               icon: const Icon(Icons.add, size: 16, color: Colors.white),
@@ -515,7 +516,8 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.6),
-            labelText: '縣/市'
+            labelText: '縣/市',
+            labelStyle: const TextStyle(color: Colors.teal)
           ),
         ),
         const SizedBox(height: 16),
@@ -532,7 +534,8 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.6),
-            labelText: '行政區'
+            labelText: '行政區',
+            labelStyle: const TextStyle(color: Colors.teal)
           ),
         ),
         
@@ -553,8 +556,18 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
     );
   }
 
+  // 🎯 統一控制「設備資訊」頁面圓角卡片的頂部高度與透明度：
+  // 1. 調整上下位置：修改 _kTopSpacingWide (手機展開/寬版頂部距離，原本是 100，改為 16 讓卡片大幅往上移！)
+  // 2. 調整透明度：修改 _kDeviceCardOpacity (0.0 全透明 ~ 1.0 不透明，原本是 0.65，改為 0.50 更通透)
+  static const double _kTopSpacingWide = 16.0;
+  static const double _kTopSpacingCompact = 60.0;
+  static const double _kDeviceCardOpacity = 0.50;
+  static const double _kDeviceCardBorderOpacity = 0.45;
+
   @override
   Widget build(BuildContext context) {
+    final bool isWide = context.useWideLayout;
+
     return Scaffold(
       extendBodyBehindAppBar: true, 
       backgroundColor: Colors.transparent, 
@@ -562,68 +575,125 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
         backgroundColor: Colors.transparent, 
         elevation: 0,
         title: const Text('設備資訊', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color:Colors.white), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SizedBox.expand(
         child: Stack(
           children: [
-            Positioned.fill(child: Image.asset('assets/deviceinfo_full_bg.png', fit: BoxFit.cover)),
+            Positioned.fill(
+              child: Image.asset('assets/deviceinfo_full_bg.png', fit: BoxFit.cover),
+            ),
             
             SafeArea(
               bottom: false, 
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const SizedBox(height: 100),
+                    // 🎯 關鍵修改 1：將原本固定的 100 縮減為 16 (寬版) / 60 (窄版)，讓圓角卡片往上移動！
+                    SizedBox(height: isWide ? _kTopSpacingWide : _kTopSpacingCompact),
                     
                     ClipRRect(
                       borderRadius: BorderRadius.circular(20),
                       child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.65), 
+                            // 🎯 關鍵修改 2：綁定 _kDeviceCardOpacity 調整毛玻璃透明度
+                            color: Colors.white.withValues(alpha: _kDeviceCardOpacity), 
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: _kDeviceCardBorderOpacity),
+                              width: 1.5,
+                            ),
                           ),
                           child: Column(
                             children: [
                               Container(
-                                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.black12))),
+                                decoration: const BoxDecoration(
+                                  border: Border(bottom: BorderSide(color: Colors.black12)),
+                                ),
                                 child: Row(
                                   children: [
-                                    // 🎯 標籤 1
+                                    // 🎯 標籤 1：儲能逆變器
                                     Expanded(
                                       child: InkWell(
                                         onTap: () => setState(() => _selectedTabIndex = 0),
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(vertical: 16),
-                                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _selectedTabIndex == 0 ? Colors.teal : Colors.transparent, width: 3))),
-                                          child: Text('儲能逆變器', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: _selectedTabIndex == 0 ? Colors.teal : Colors.black45, fontSize: 13)),
+                                          decoration: BoxDecoration(
+                                            border: Border(
+                                              bottom: BorderSide(
+                                                color: _selectedTabIndex == 0 ? Colors.teal : Colors.transparent,
+                                                width: 3,
+                                              ),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '儲能逆變器',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: _selectedTabIndex == 0 ? Colors.teal : Colors.black45,
+                                              fontSize: 13,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
-                                    // 🎯 標籤 2
+                                    // 🎯 標籤 2：電池模組
                                     Expanded(
                                       child: InkWell(
                                         onTap: () => setState(() => _selectedTabIndex = 1),
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(vertical: 16),
-                                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _selectedTabIndex == 1 ? Colors.teal : Colors.transparent, width: 3))),
-                                          child: Text('電池模組', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: _selectedTabIndex == 1 ? Colors.teal : Colors.black45, fontSize: 13)),
+                                          decoration: BoxDecoration(
+                                            border: Border(
+                                              bottom: BorderSide(
+                                                color: _selectedTabIndex == 1 ? Colors.teal : Colors.transparent,
+                                                width: 3,
+                                              ),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '電池模組',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: _selectedTabIndex == 1 ? Colors.teal : Colors.black45,
+                                              fontSize: 13,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
-                                    // 🎯 標籤 3 (新增)
+                                    // 🎯 標籤 3：安裝區域
                                     Expanded(
                                       child: InkWell(
                                         onTap: () => setState(() => _selectedTabIndex = 2),
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(vertical: 16),
-                                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _selectedTabIndex == 2 ? Colors.teal : Colors.transparent, width: 3))),
-                                          child: Text('安裝區域', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: _selectedTabIndex == 2 ? Colors.teal : Colors.black45, fontSize: 13)),
+                                          decoration: BoxDecoration(
+                                            border: Border(
+                                              bottom: BorderSide(
+                                                color: _selectedTabIndex == 2 ? Colors.teal : Colors.transparent,
+                                                width: 3,
+                                              ),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '安裝區域',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: _selectedTabIndex == 2 ? Colors.teal : Colors.black45,
+                                              fontSize: 13,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -635,7 +705,7 @@ class _DeviceInfoSettingsScreenState extends State<DeviceInfoSettingsScreen> {
                                 child: _selectedTabIndex == 0 
                                     ? _buildInverterTab() 
                                     : (_selectedTabIndex == 1 ? _buildBatteryTab() : _buildLocationTab()),
-                              )
+                              ),
                             ],
                           ),
                         ),

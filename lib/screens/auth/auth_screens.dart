@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import '../../core/constants.dart'; // 🎯 引入三態響應式佈局擴充方法
 import '/utils/audit_logger.dart';
 
 // ==========================================
@@ -464,40 +465,57 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
-    final bool isWideScreen = MediaQuery.of(context).size.width > 800;
+    final bool isWideScreen = context.useWideLayout;
+    final Size screenSize = MediaQuery.sizeOf(context);
+    // 🎯 偵測右側是否有 iPhone Duo 的系統工具欄安全區內縮 (例如右上角的時間與訊號圓弧工具欄)
+    final double rightSystemInset = MediaQuery.viewPaddingOf(context).right;
 
     return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              isWideScreen ? 'assets/web_login_bg.png' : 'assets/login_full_bg.png', 
-              fit: BoxFit.cover,
-            ),
-          ),
-          
-          Positioned.fill(
-            child: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return SingleChildScrollView(
+      body: MediaQuery.removePadding(
+        context: context,
+        removeLeft: true,
+        removeRight: true,
+        child: MediaQuery.removeViewPadding(
+          context: context,
+          removeLeft: true,
+          removeRight: true,
+          child: SizedBox(
+            width: screenSize.width,
+            height: screenSize.height,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned.fill(
+                  child: Image.asset(
+                    isWideScreen ? 'assets/web_login_bg.jpg' : 'assets/login_full_bg.png', 
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                
+                // 🎯 關鍵優化：直接以全螢幕 Stack 正中央對齊登入卡片，
+                // 若在手機寬版且右側有系統工具欄遮擋，可透過補償偏移確保視覺 100% 絕對水平置中！
+                Positioned.fill(
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
-                        minHeight: constraints.maxHeight, 
+                        minHeight: screenSize.height,
+                        minWidth: screenSize.width,
                       ),
                       child: IntrinsicHeight(
                         child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            isWideScreen ? const Spacer() : const SizedBox(height: 200), 
+                            const Spacer(), 
                             
-                            Padding(
-                              padding: EdgeInsets.only(
-                                left: 24.0, 
-                                right: isWideScreen ? 120.0 : 24.0,
-                              ),
-                              child: Align( 
-                                alignment: isWideScreen ? Alignment.centerRight : Alignment.center,
+                            // 🎯 若 iPhone Duo 右側有系統工具欄內縮，向右微調補償，讓卡片在視覺畫面上絕對置中
+                            Transform.translate(
+                              offset: Offset(isWideScreen && rightSystemInset == 0 ? 24.0 : 0.0, 0.0),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 24.0),
                                 child: ConstrainedBox( 
                                   constraints: const BoxConstraints(maxWidth: 400),
                                   child: ClipRRect(
@@ -563,7 +581,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                               ),
                                             ),
                                             const SizedBox(height: 8),
-                                            // 🎯 修改區塊：移除自動登入，並將忘記密碼移至此處
                                             Row(
                                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                               children: [
@@ -593,7 +610,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                                 : const Text('登入', style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
                                             ),
                                             const SizedBox(height: 12),
-                                            // 🎯 修改區塊：將註冊按鈕獨立放在此處，使其透過外層自動延展為等寬
                                             OutlinedButton(
                                               style: OutlinedButton.styleFrom(
                                                 padding: const EdgeInsets.symmetric(vertical: 14), 
@@ -614,19 +630,22 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                             
                             const Spacer(),
                             
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 24.0),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(20),
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.6),
-                                      borderRadius: BorderRadius.circular(20),
+                            Transform.translate(
+                              offset: Offset(isWideScreen && rightSystemInset == 0 ? 24.0 : 0.0, 0.0),
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 24.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.6),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: _buildConnectionStatusLight(),
                                     ),
-                                    child: _buildConnectionStatusLight(),
                                   ),
                                 ),
                               ),
@@ -635,12 +654,12 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  );
-                },
-              ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -718,64 +737,70 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('請填寫下方資訊以註冊您的帳號', style: TextStyle(color: Colors.black54, fontSize: 12)),
-              const SizedBox(height: 24),
-              TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: '電子郵件 (Email)', prefixIcon: Icon(Icons.email), border: OutlineInputBorder())),
-              const SizedBox(height: 16),
-              
-              TextField(
-                controller: _passwordController, 
-                obscureText: _obscurePassword, 
-                decoration: InputDecoration(
-                  labelText: '請輸入您的密碼', 
-                  prefixIcon: const Icon(Icons.lock_outline), 
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, size: 20, color: Colors.grey),
-                    onPressed: () { setState(() { _obscurePassword = !_obscurePassword; }); },
-                  ),
-                )
-              ),
-              const SizedBox(height: 16),
-
-              TextField(
-                controller: _confirmPasswordController, 
-                obscureText: _obscureConfirmPassword, 
-                decoration: InputDecoration(
-                  labelText: '請再次輸入密碼', 
-                  prefixIcon: const Icon(Icons.lock), 
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility, size: 20, color: Colors.grey),
-                    onPressed: () { setState(() { _obscureConfirmPassword = !_obscureConfirmPassword; }); },
-                  ),
-                )
-              ),
-              const SizedBox(height: 16),
-              Row(
+        child: Center(
+          child: ConstrainedBox(
+            // 🎯 在寬螢幕 (手機寬版 / 網頁版) 下限制最大表單寬度為 500，避免欄位過度拉長
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Checkbox(value: _agreeTerms, activeColor: Colors.teal, onChanged: (value) { setState(() { _agreeTerms = value ?? false; }); }),
-                  const Text('我已閱讀並同意 ', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                  GestureDetector(
-                    onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const TermsScreen())); },
-                    child: const Text('使用者服務條款', style: TextStyle(fontSize: 13, color: Colors.teal, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                  const Text('請填寫下方資訊以註冊您的帳號', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const SizedBox(height: 24),
+                  TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: '電子郵件 (Email)', prefixIcon: Icon(Icons.email), border: OutlineInputBorder())),
+                  const SizedBox(height: 16),
+                  
+                  TextField(
+                    controller: _passwordController, 
+                    obscureText: _obscurePassword, 
+                    decoration: InputDecoration(
+                      labelText: '請輸入您的密碼', 
+                      prefixIcon: const Icon(Icons.lock_outline), 
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, size: 20, color: Colors.grey),
+                        onPressed: () { setState(() { _obscurePassword = !_obscurePassword; }); },
+                      ),
+                    )
+                  ),
+                  const SizedBox(height: 16),
+
+                  TextField(
+                    controller: _confirmPasswordController, 
+                    obscureText: _obscureConfirmPassword, 
+                    decoration: InputDecoration(
+                      labelText: '請再次輸入密碼', 
+                      prefixIcon: const Icon(Icons.lock), 
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility, size: 20, color: Colors.grey),
+                        onPressed: () { setState(() { _obscureConfirmPassword = !_obscureConfirmPassword; }); },
+                      ),
+                    )
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Checkbox(value: _agreeTerms, activeColor: Colors.teal, onChanged: (value) { setState(() { _agreeTerms = value ?? false; }); }),
+                      const Text('我已閱讀並同意 ', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                      GestureDetector(
+                        onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const TermsScreen())); },
+                        child: const Text('使用者服務條款', style: TextStyle(fontSize: 13, color: Colors.teal, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                    onPressed: _isLoading ? null : _handleRegister,
+                    child: _isLoading
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
+                      : const Text('註冊帳號', style: TextStyle(fontSize: 16, color: Colors.white)),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                onPressed: _isLoading ? null : _handleRegister,
-                child: _isLoading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
-                  : const Text('註冊帳號', style: TextStyle(fontSize: 16, color: Colors.white)),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -813,13 +838,19 @@ class TermsScreen extends StatelessWidget {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal)));
             }
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16.0),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[300]!)),
-                child: Text(snapshot.data ?? '', style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.6)),
+            return Center(
+              child: ConstrainedBox(
+                // 🎯 在寬螢幕下限制條款閱讀區最大寬度為 720，提升閱讀體驗
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16.0),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[300]!)),
+                    child: Text(snapshot.data ?? '', style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.6)),
+                  ),
+                ),
               ),
             );
           },

@@ -421,7 +421,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const Divider(color: Color(0xFFF1F5F9), height: 1),
                       ListTile(
                         leading: const Icon(Icons.notifications_active_rounded, color: Colors.teal),
-                        title: const Text('系統推播通知設定', style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
+                        title: const Text('系統推播通知', style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
                         trailing: const Icon(Icons.chevron_right, color: Colors.black26),
                         onTap: () async {
                           final user = Supabase.instance.client.auth.currentUser;

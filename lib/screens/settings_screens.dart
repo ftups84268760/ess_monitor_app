@@ -314,7 +314,7 @@ class _PushNotificationSettingsScreenState extends State<PushNotificationSetting
     return Scaffold(
       backgroundColor: Colors.white, 
       appBar: AppBar(
-        title: const Text('系統推播通知條件', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+        title: const Text('系統推播通知設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
@@ -595,7 +595,7 @@ class _ElectricityTariffScreenState extends State<ElectricityTariffScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text('請選擇您的台電電價方案：', style: TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.bold)),
+                        const Text('請選擇您的台電電價方案：', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 16),
 
                         DropdownButtonFormField<String>(
@@ -902,8 +902,18 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
     return Colors.amber;
   }
 
+  // 🎯 統一控制「惡劣天氣提醒」頁面內圓角卡片的透明度與頂部高度：
+  // 1. 調整透明度：修改 _kWeatherCardOpacity (0.0 全透明 ~ 1.0 不透明，原本是 0.65，改為 0.50 更通透)
+  // 2. 調整上下位置：修改 _kTopSpacingWide (手機展開/寬版頂部距離) 與 _kTopSpacingCompact (手機直向頂部距離)
+  static const double _kWeatherCardOpacity = 0.50;
+  static const double _kWeatherCardBorderOpacity = 0.45;
+  static const double _kTopSpacingWide = 16.0;
+  static const double _kTopSpacingCompact = 60.0;
+
   @override
   Widget build(BuildContext context) {
+    final bool isWide = context.useWideLayout;
+
     return Scaffold(
       extendBodyBehindAppBar: true, 
       extendBody: true, 
@@ -911,7 +921,10 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent, 
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.white), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SizedBox.expand(
         child: Stack(
@@ -926,21 +939,25 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
             SafeArea(
               bottom: false, 
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const SizedBox(height: 160),
+                    SizedBox(height: isWide ? _kTopSpacingWide : _kTopSpacingCompact),
 
+                    // ─── 第一張圓角卡片：惡劣天氣提醒與備援模式開關 ───
                     ClipRRect(
                       borderRadius: BorderRadius.circular(20),
                       child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.65), 
+                            color: Colors.white.withValues(alpha: _kWeatherCardOpacity), 
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: _kWeatherCardBorderOpacity),
+                              width: 1.5,
+                            ),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
                           child: Column(
@@ -949,7 +966,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                               SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
                                 dense: true,
-                                title: const Text('惡劣天氣提醒', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal)),
+                                title: const Text('惡劣天氣提醒', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
                                 subtitle: Text(GlobalState.isBackupProtectionEnabled ? '已開啟' : '已關閉', style: const TextStyle(fontSize: 12, color: Colors.black54)),
                                 activeThumbColor: Colors.white,
                                 activeTrackColor: Colors.teal,
@@ -961,7 +978,10 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                               
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
                                 child: const Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -991,7 +1011,75 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                                   onPressed: _isStormBackupMode 
                                       ? null 
                                       : (widget.isRootOrOwner 
-                                          ? _enableStormBackupMode 
+                                          ? () {
+                                              // 🎯 比照「通訊模組(DTU)更換」樣式：背景模糊 (sigma: 10) + 黑色半透明視窗 (alpha: 0.6)
+                                              showDialog(
+                                                context: context,
+                                                builder: (BuildContext dialogContext) {
+                                                  return BackdropFilter(
+                                                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                                    child: AlertDialog(
+                                                      backgroundColor: Colors.black.withValues(alpha: 0.6),
+                                                      elevation: 0,
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(20),
+                                                        side: BorderSide(
+                                                          color: Colors.white.withValues(alpha: 0.2),
+                                                          width: 1.5,
+                                                        ),
+                                                      ),
+                                                      title: const Row(
+                                                        children: [
+                                                          Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 22),
+                                                          SizedBox(width: 8),
+                                                          Text(
+                                                            '開啟備援模式',
+                                                            style: TextStyle(
+                                                              fontSize: 16,
+                                                              fontWeight: FontWeight.bold,
+                                                              color: Colors.white,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      content: ConstrainedBox(
+                                                        constraints: const BoxConstraints(maxWidth: 340),
+                                                        child: const Text(
+                                                          '確定要開啟「惡劣天氣備援模式」嗎？',
+                                                          style: TextStyle(
+                                                            fontSize: 13,
+                                                            color: Colors.white70,
+                                                            height: 1.5,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () => Navigator.of(dialogContext).pop(),
+                                                          child: const Text(
+                                                            '取消',
+                                                            style: TextStyle(color: Colors.grey),
+                                                          ),
+                                                        ),
+                                                        TextButton(
+                                                          onPressed: () {
+                                                            Navigator.of(dialogContext).pop();
+                                                            _enableStormBackupMode();
+                                                          },
+                                                          child: const Text(
+                                                            '確定開啟',
+                                                            style: TextStyle(
+                                                              color: Colors.tealAccent,
+                                                              fontWeight: FontWeight.bold,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                },
+                                              );
+                                            }
                                           : () {
                                               ScaffoldMessenger.of(context).clearSnackBars(); 
                                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1011,17 +1099,21 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 16),
 
+                    // ─── 第二張圓角卡片：未來 24 小時天氣預測 ───
                     ClipRRect(
                       borderRadius: BorderRadius.circular(20),
                       child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.65), 
+                            color: Colors.white.withValues(alpha: _kWeatherCardOpacity), 
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: _kWeatherCardBorderOpacity),
+                              width: 1.5,
+                            ),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
                           child: Column(
@@ -1030,7 +1122,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text('📍 未來24小時天氣預測', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal)),
+                                  const Text('📍 未來24小時天氣預測', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
                                   IconButton(
                                     icon: const Icon(Icons.refresh, color: Colors.teal, size: 20),
                                     constraints: const BoxConstraints(),
@@ -1049,7 +1141,10 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                                       ? Container(
                                           width: double.infinity,
                                           padding: const EdgeInsets.all(20),
-                                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: _kWeatherCardOpacity * 0.8),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
                                           child: const Text('「尚未設定安裝區域」或「無法取得當前區域預報」', style: TextStyle(color: Colors.black54, fontSize: 13), textAlign: TextAlign.center),
                                         )
                                       : SizedBox(
@@ -1083,7 +1178,7 @@ class _WeatherForecastScreenState extends State<WeatherForecastScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),

@@ -10,7 +10,6 @@ import 'services/notification_service.dart';
 import 'screens/auth/auth_screens.dart';
 import 'screens/main_navigation_screen.dart';
 
-import 'widgets/responsive_layout.dart';
 import 'screens/web_admin_screen.dart';
 import 'package:flutter/foundation.dart'; 
 
@@ -320,25 +319,12 @@ class _RootScreenState extends State<RootScreen> {
         );
       } else {
         return Scaffold(
-          body: Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              color: Color(0xFF0F172A),
-            ),
+          backgroundColor: Colors.white,
+          body: Center(
             child: Image.asset(
-              'assets/splash_bg.png',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.bolt_rounded, size: 64, color: Colors.tealAccent),
-                    SizedBox(height: 16),
-                    Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
+              'assets/images/splash_logo.png', 
+              width: 200,
+              errorBuilder: (context, error, stackTrace) => const SizedBox(), 
             ),
           ),
         );
@@ -346,23 +332,18 @@ class _RootScreenState extends State<RootScreen> {
     }
 
     if (_isLoggedIn) {
-      // 🎯 用我們剛寫好的監聽器包覆整個已登入的畫面
       return WebSessionTimeoutListener(
         duration: const Duration(minutes: 10),
-        //duration: const Duration(hours: 1),
         onTimeout: () async {
-          // 1. 先執行非同步任務
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('auto_login', false);
           await Supabase.instance.client.auth.signOut();
           
-          // 2. 判斷 State 是否還活著，來更新狀態
           if (!mounted) return;
           setState(() {
             _isLoggedIn = false;
           });
 
-          // 3. 🎯 關鍵修正：判斷 Context 是否還活著，再來顯示 SnackBar
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -371,25 +352,30 @@ class _RootScreenState extends State<RootScreen> {
             ),
           );
         },
-        child: ResponsiveLayout(
-          mobileApp: MainNavigationScreen(onLogout: () async {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setBool('auto_login', false);
-            
-            if (!kIsWeb) {
-              try { await FirebaseMessaging.instance.deleteToken(); } catch (_) {}
-            }
-            await Supabase.instance.client.auth.signOut();
-            
-            setState(() {
-              _isLoggedIn = false;
-            });
-          }),
-          webAdmin: const WebAdminScreen(), 
-        ),
+        // 🎯 關鍵修改：以「是否為瀏覽器 (kIsWeb)」作為第一層平台分界！
+        // 1. 若為瀏覽器 (kIsWeb == true)：載入 WebAdminScreen (網頁版)
+        // 2. 若為手機/平板 (!kIsWeb)：一律載入 MainNavigationScreen，並由其內部自動依寬度切換「手機寬版」或「手機一般窄版」
+        child: kIsWeb
+            ? const WebAdminScreen()
+            : MainNavigationScreen(
+                onLogout: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('auto_login', false);
+
+                  if (!kIsWeb) {
+                    try {
+                      await FirebaseMessaging.instance.deleteToken();
+                    } catch (_) {}
+                  }
+                  await Supabase.instance.client.auth.signOut();
+
+                  setState(() {
+                    _isLoggedIn = false;
+                  });
+                },
+              ),
       );
-    }
-    else {
+    } else {
       return LoginScreen(onLoginSuccess: () {
         _setupAndUploadFcmToken();
         

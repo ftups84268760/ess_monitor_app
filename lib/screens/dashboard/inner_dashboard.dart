@@ -4,6 +4,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:lunar/lunar.dart'; 
 import 'package:url_launcher/url_launcher.dart'; 
+import '../../core/constants.dart';
+import '../device_list_screen.dart'; // 🎯 引入 GlobalDeviceState 記憶當前頁籤
 import 'home_screen.dart';
 import 'analysis_screen.dart';
 import 'data_alarm_screens.dart';
@@ -72,6 +74,9 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
   @override
   void initState() {
     super.initState();
+    // 🎯 恢復上次記憶的分頁索引 (0:總覽, 1:分析, 2:數據, 3:告警)
+    _currentIndex = GlobalDeviceState.dashboardTabIndex;
+
     WidgetsBinding.instance.addObserver(this); 
     
     _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
@@ -101,16 +106,9 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // 🎯 延遲 2 秒，給予設備網路模組喚醒與重連的時間，避免 Supabase 因斷網而拋出錯誤
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           _updateTimeAndLunar();
-          // 如果您有其他需要在喚醒時重新抓取的資料，也可以放在這裡，例如：
-          // _checkOwnership();
-          // _fetchCloudReadBroadcasts().then((_) {
-          //   _fetchNotifications();
-          //   _fetchBroadcasts(); 
-          // });
         }
       });
     }
@@ -228,7 +226,7 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
 
     Supabase.instance.client.channel('public:system_broadcasts_updates')
       .onPostgresChanges(
-        event: PostgresChangeEvent.all, // 🎯 關鍵修改：從 insert 改為 all，這樣新增、修改、刪除都會觸發更新
+        event: PostgresChangeEvent.all,
         schema: 'public',
         table: 'system_broadcasts',
         callback: (payload) { _fetchBroadcasts(); }
@@ -426,6 +424,7 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
     
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true, // 🎯 底部通知選單使用頂層顯示
       backgroundColor: Colors.transparent, 
       barrierColor: Colors.black.withValues(alpha: 0.25), 
       isScrollControlled: true, 
@@ -610,7 +609,6 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
                                                   ),
                                                 ),
                                                 const SizedBox(width: 8),
-                                                // 🎯 修改：全部刪除按鈕加入 AlertDialog 確認視窗
                                                 TextButton.icon(
                                                   icon: const Icon(Icons.delete_outline_rounded, size: 16),
                                                   label: const Text('全部刪除', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
@@ -810,36 +808,49 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
     });
   }
 
+  bool _isHomeDarkEnv = false;
+
+  @override
   @override
   Widget build(BuildContext context) {
-    bool isWideScreen = MediaQuery.of(context).size.width > 800;
+    final bool isWideScreen = context.useWideLayout;
 
-    if (widget.isPushedFullScreen && isWideScreen) {
+    if (context.isWebLayout && widget.isPushedFullScreen && isWideScreen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && Navigator.canPop(context)) {
           Navigator.pop(context, 'resize'); 
         }
       });
     }
+
+    // 🎯 關鍵優化：只要在「總覽 (_currentIndex == 0)」且背景為「夜晚或深色天氣 (_isHomeDarkEnv)」，
+    // 上方 AppBar 的逆變器名稱、SN 序號、返回箭頭與通知鈴鐺全部自動切換為明亮白色！
+    final bool useLightAppBarText = (_currentIndex == 0) && _isHomeDarkEnv;
+    final Color primaryAppBarColor = useLightAppBarText ? Colors.white : Colors.black87;
+    final Color secondaryAppBarColor = useLightAppBarText ? Colors.white70 : Colors.black54;
     
     return PopScope(
       canPop: _currentIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop && _currentIndex != 0) {
-          setState(() { _currentIndex = 0; });
+          setState(() {
+            _currentIndex = 0;
+            GlobalDeviceState.dashboardTabIndex = 0;
+          });
         }
       },
       child: Scaffold(
         extendBodyBehindAppBar: true,
         backgroundColor: Colors.white,
         appBar: AppBar(
-          systemOverlayStyle: const SystemUiOverlayStyle(
+          systemOverlayStyle: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent, 
-            statusBarIconBrightness: Brightness.dark, 
-            statusBarBrightness: Brightness.light,    
+            statusBarIconBrightness: useLightAppBarText ? Brightness.light : Brightness.dark, 
+            statusBarBrightness: useLightAppBarText ? Brightness.dark : Brightness.light,    
           ),
           backgroundColor: Colors.transparent,
           elevation: 0,
+          automaticallyImplyLeading: !isWideScreen,
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start, 
             mainAxisSize: MainAxisSize.min,
@@ -849,18 +860,22 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
                 children: [
                   Text(
                     widget.customInverterName,
-                    style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.bold)
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: primaryAppBarColor, // 🎯 夜晚自動反白
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Container(
                     width: 9,
                     height: 9,
                     decoration: BoxDecoration(
-                      color: _isDeviceOnline ? Colors.green : Colors.red,
+                      color: _isDeviceOnline ? Colors.greenAccent : Colors.redAccent,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: (_isDeviceOnline ? Colors.green : Colors.red).withValues(alpha: 0.5),
+                          color: (_isDeviceOnline ? Colors.greenAccent : Colors.redAccent).withValues(alpha: 0.6),
                           blurRadius: 4,
                           spreadRadius: 1,
                         )
@@ -871,17 +886,24 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
               ),
               Text(
                 'SN: ${widget.inverterSn}',
-                style: const TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: secondaryAppBarColor, // 🎯 夜晚自動切換為柔和亮白
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
-          leading: MediaQuery.of(context).size.width > 800
-              ? const SizedBox.shrink()
+          leading: isWideScreen
+              ? null
               : IconButton(
-                  icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.black87),
+                  icon: Icon(Icons.arrow_back_ios, size: 16, color: primaryAppBarColor), // 🎯 返回箭頭同步反白
                   onPressed: () {
                     if (_currentIndex != 0) {
-                      setState(() { _currentIndex = 0; });
+                      setState(() {
+                        _currentIndex = 0;
+                        GlobalDeviceState.dashboardTabIndex = 0;
+                      });
                     } else {
                       Navigator.pop(context);
                     }
@@ -892,7 +914,7 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
               alignment: Alignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.notifications_none, color: Colors.black87, size: 26),
+                  icon: Icon(Icons.notifications_none, color: primaryAppBarColor, size: 26), // 🎯 通知鈴鐺同步反白
                   onPressed: _showNotificationSheet,
                 ),
                 if (_totalUnreadCount > 0)
@@ -928,25 +950,77 @@ class _InnerDashboardNavigationState extends State<InnerDashboardNavigation> wit
               isDeviceOnline: _isDeviceOnline, 
               accountType: widget.accountType,
               inverterSn: widget.inverterSn,
+              // 🎯 接收來自 HomeScreen 的深色環境狀態通知
+              onDarkEnvChanged: (isDark) {
+                if (mounted && _isHomeDarkEnv != isDark) {
+                  setState(() {
+                    _isHomeDarkEnv = isDark;
+                  });
+                }
+              },
             ),
             SafeArea(child: AnalysisScreen(deviceDbId: widget.deviceDbId)),
             SafeArea(child: RawDataScreen(deviceDbId: widget.deviceDbId, inverterSn: widget.inverterSn)),
             SafeArea(child: AlarmListScreen(deviceDbId: widget.deviceDbId, inverterSn: widget.inverterSn))
           ]
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: Colors.teal,
-          unselectedItemColor: Colors.black38,
-          currentIndex: _currentIndex,
-          onTap: (index) { setState(() { _currentIndex = index; }); },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.bolt, size: 16), label: '總覽'),
-            BottomNavigationBarItem(icon: Icon(Icons.analytics, size: 16), label: '分析'),
-            BottomNavigationBarItem(icon: Icon(Icons.bar_chart, size: 16), label: '數據'),
-            BottomNavigationBarItem(icon: Icon(Icons.warning_amber_rounded, size: 16), label: '告警')
-          ],
+        // 🎯 跨平台智慧底部導覽列 (完美支援 Android 三鍵導覽列與 iOS 展開模式)：
+        // 1. 外層 Container 塗滿白色並由 SafeArea(top: false) 自動避開 Android 底部「||| O <」三鍵導覽列，徹底解決重疊問題！
+        // 2. 內層再用 MediaQuery.removePadding(removeBottom: true) 搭配固定緊湊高度 (46px/50px)，避免 BottomNavigationBar 自己重複疊加第二次留白！
+        bottomNavigationBar: Builder(
+          builder: (context) {
+            // 🎯 1. 取得手機系統底部的安全區高度 (Android 三鍵約 48px，iPhone 直向約 34px、橫向約 21px)
+            final double sysBottomInset = MediaQuery.viewPaddingOf(context).bottom;
+
+            // 🎯 2. 【在這裡自由調整高度】：
+            // - navBarHeight：導覽列按鈕區本體的高度 (預設調高為：寬版 54px / 直向 58px，數字越大越高)
+            // - extraBottomPadding：底部往下墊高的距離
+            //   (若在寬版 iPhone 覺得太貼底，可設為 8.0 ~ 16.0；若在直向或 Android 則直接採用系統的 sysBottomInset)
+            final double navBarHeight = isWideScreen ? 54.0 : 58.0;
+            final double extraBottomPadding = isWideScreen
+                ? (sysBottomInset > 24.0 ? sysBottomInset : 0.0) // 👈 修改這個 10.0 可微調 iPhone 寬版底部墊高距離！
+                : sysBottomInset;
+
+            return Container(
+              padding: EdgeInsets.only(bottom: extraBottomPadding),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  top: BorderSide(color: Colors.black12, width: 0.5),
+                ),
+              ),
+              child: MediaQuery.removePadding(
+                context: context,
+                removeBottom: true, // 移除內部預設留白，完全交由上方的 navBarHeight 與 extraBottomPadding 精準控制！
+                child: SizedBox(
+                  height: navBarHeight,
+                  child: BottomNavigationBar(
+                    type: BottomNavigationBarType.fixed,
+                    backgroundColor: Colors.white,
+                    elevation: 0,
+                    selectedItemColor: Colors.teal,
+                    unselectedItemColor: Colors.black38,
+                    selectedFontSize: 12,   // 字體同步稍微放大至 12，視覺更平衡
+                    unselectedFontSize: 12,
+                    iconSize: 18,           // 圖示同步稍微放大至 18
+                    currentIndex: _currentIndex,
+                    onTap: (index) {
+                      setState(() {
+                        _currentIndex = index;
+                        GlobalDeviceState.dashboardTabIndex = index;
+                      });
+                    },
+                    items: const [
+                      BottomNavigationBarItem(icon: Icon(Icons.bolt), label: '總覽'),
+                      BottomNavigationBarItem(icon: Icon(Icons.analytics), label: '分析'),
+                      BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: '數據'),
+                      BottomNavigationBarItem(icon: Icon(Icons.warning_amber_rounded), label: '告警'),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

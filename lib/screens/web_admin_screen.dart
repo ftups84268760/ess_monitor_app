@@ -6,7 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_html/html.dart' as html; 
 import 'package:flutter/foundation.dart'; 
 import 'package:mqtt_client/mqtt_client.dart';
-import 'package:package_info_plus/package_info_plus.dart'; // 🎯 新增：引入讀取版本資訊的套件
+import 'package:package_info_plus/package_info_plus.dart';
 import '../utils/mqtt_factory.dart';
 
 import 'device_list_screen.dart'; 
@@ -39,7 +39,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   DateTime? _loginTime;
   String _loginDurationStr = '00:00:00';
   String _currentTimeStr = ''; 
-  String _appVersion = '讀取中...'; // 🎯 新增：儲存軟體版本號
+  String _appVersion = '讀取中...';
 
   RealtimeChannel? _profileChannel; 
 
@@ -50,7 +50,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     final now = DateTime.now();
     _currentTimeStr = "${now.year}/${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
 
-    _initPackageInfo(); // 🎯 新增：初始化時讀取版本號
+    _initPackageInfo();
     _fetchUserProfile(); 
     _initLoginTimer(); 
     _setupProfileSubscription(); 
@@ -63,7 +63,6 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
   }
 
-  // 🎯 新增：讀取 App 版本資訊的函式
   Future<void> _initPackageInfo() async {
     try {
       final PackageInfo info = await PackageInfo.fromPlatform();
@@ -181,9 +180,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
   void dispose() {
     _loginTimer?.cancel(); 
     _profileChannel?.unsubscribe(); 
-    if (_selectedDeviceDbId != null) {
-      GlobalDeviceState.needsNarrowPush = true;
-    }
+    // 🎯 已移除舊版 GlobalDeviceState.needsNarrowPush 呼叫，消除編譯錯誤
     super.dispose();
   }
 
@@ -224,9 +221,8 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
               child: Column(
                 children: [
                   const SizedBox(height: 40),
-                  const Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('FTESS Home', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.normal)),
                   const SizedBox(height: 4),
-                  // 🎯 新增：顯示軟體版本號
                   Text(_appVersion, style: const TextStyle(color: Colors.tealAccent, fontSize: 11, letterSpacing: 0.5, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 32),
                   
@@ -268,7 +264,7 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
                   Material(
                     color: _selectedIndex == 3 ? Colors.white.withValues(alpha: 0.15) : Colors.transparent,
                     child: PopupMenuButton<String>(
-                      offset: const Offset(0, -115), // 🎯 搭配下方 position 讓選單由下往上展開
+                      offset: const Offset(0, -115),
                       position: PopupMenuPosition.over,
                       color: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -360,13 +356,18 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
 
   Widget _buildRightPanelContent() {
     if (_selectedIndex == 3) {
-      return ProfileScreen(
-        nickname: _nickname,
-        accountType: _userRole,
-        userEmail: Supabase.instance.client.auth.currentUser?.email ?? '',
-        avatarUrl: _avatarUrl,
-        onLogout: _handleLogout,
-        onProfileDataChanged: _fetchUserProfile, 
+      return Navigator(
+        key: const ValueKey('web_profile_nav'),
+        onGenerateRoute: (settings) => MaterialPageRoute(
+          builder: (context) => ProfileScreen(
+            nickname: _nickname,
+            accountType: _userRole,
+            userEmail: Supabase.instance.client.auth.currentUser?.email ?? '',
+            avatarUrl: _avatarUrl,
+            onLogout: _handleLogout,
+            onProfileDataChanged: _fetchUserProfile, 
+          ),
+        ),
       );
     }
     if (_selectedIndex == 2 && _isAdmin) {
@@ -377,12 +378,21 @@ class _WebAdminScreenState extends State<WebAdminScreen> {
     }
 
     if (_selectedDeviceDbId != null) {
-      return InnerDashboardNavigation(
-        customInverterName: _selectedDeviceName,
-        isInverterOnline: _selectedDeviceIsOnline,
-        deviceDbId: _selectedDeviceDbId!,
-        inverterSn: _selectedDeviceSn, 
-        accountType: _userRole, 
+      // 🎯 使用局部 Navigator 包裝逆變器儀表板，讓網頁版點擊「電價方案」或「時間電價排程」時，
+      // 頁面也只會在右側區域內開啟，不會覆蓋左側的深色管理選單！
+      return Navigator(
+        key: ValueKey('web_nav_$_selectedDeviceDbId'),
+        onGenerateRoute: (settings) {
+          return MaterialPageRoute(
+            builder: (context) => InnerDashboardNavigation(
+              customInverterName: _selectedDeviceName,
+              isInverterOnline: _selectedDeviceIsOnline,
+              deviceDbId: _selectedDeviceDbId!,
+              inverterSn: _selectedDeviceSn, 
+              accountType: _userRole, 
+            ),
+          );
+        },
       );
     } else {
       return DeviceListScreen(

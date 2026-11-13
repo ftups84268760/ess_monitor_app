@@ -22,6 +22,7 @@ class HomeScreen extends StatefulWidget {
   final bool isDeviceOnline;
   final String accountType; 
   final String inverterSn;
+  final ValueChanged<bool>? onDarkEnvChanged;
 
   const HomeScreen({
     super.key,
@@ -32,6 +33,7 @@ class HomeScreen extends StatefulWidget {
     required this.isDeviceOnline,
     required this.accountType, 
     required this.inverterSn,
+    this.onDarkEnvChanged,
   });
 
   @override
@@ -39,6 +41,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
+  // ==========================================
+  // 🎨 功能選單與卡片透明度統一控制區 (0.0 全透明 ~ 1.0 不透明)
+  // 調整這裡的數值並按 r (Hot Reload)，全選單卡片會立即同步改變透明度！
+  // ==========================================
+  static const double _kPanelOpacity = 0.35;        // 右側滑動面板外層大毛玻璃底板 (預設 35%)
+  static const double _kCardOpacity = 0.60;         // 選單內所有功能卡片統一透明度 (預設 50%)
+  static const double _kCardExpandedOpacity = 0.32; // 可收折卡片(收益/TOU/電池)展開後的內層底色 (預設 32%)
+  static const double _kCardBorderOpacity = 0.45;   // 卡片邊緣高光白框透明度 (預設 45%)
+  bool? _lastNotifiedDarkEnv;
+  
   int? batterySoc;
   double? pvPower;       
   double? gridPower;     
@@ -100,10 +112,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   String _weatherDisplay = '';
   
   int _currentWeatherCode = -1;
-  bool _isTyphoonWarning = false; // 🎯 紀錄是否處於颱風警報狀態
+  bool _isTyphoonWarning = false;
 
-  // 🎯 判斷當前天氣是否為深色背景，以此切換文字顏色 (包含颱風)
-  // 🎯 判斷當前是否為「深色背景」：包含惡劣天氣，或進入夜晚時段 (18:00 ~ 06:00)
   bool get _isDarkWeather {
     final hour = DateTime.now().hour;
     final bool isNightTime = hour >= 17 || hour < 6;
@@ -114,9 +124,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
            condition == WeatherCondition.typhoon ||
            condition == WeatherCondition.rainy ||
            condition == WeatherCondition.cloudy ||
-           condition == WeatherCondition.snow; // 下雪也順便加上
+           condition == WeatherCondition.snow;
 
-    // 只要是晚上「或」惡劣天氣，就自動切換成淺色反白文字！
     return isNightTime || isDarkWeatherCondition;
   }
 
@@ -196,31 +205,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   @override
-void didChangeAppLifecycleState(AppLifecycleState state) {
-  if (state == AppLifecycleState.resumed) {
-    debugPrint('📱 畫面喚醒：重置網路鎖並重啟更新');
-    _isFetchingTelemetry = false; // 🎯 關鍵修復 1：強制解除可能卡死的 API 請求鎖
-    _startTimers(); 
-    
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        _fetchRealLocationAndWeather();
-        _fetchTelemetryDataFromSupabase();
-        _fetchBatteries();
-        _setupRealtimeSubscription(); 
-      }
-    });
-    
-  } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-    debugPrint('📱 畫面鎖定/背景：暫停更新與中斷殭屍連線');
-    _stopTimers();
-    // 🎯 關鍵修復 2：進入背景時主動斷開 Realtime，確保下次喚醒時能乾淨重建
-    _psChannel?.unsubscribe();
-    _testChannel?.unsubscribe();
-    _psChannel = null;
-    _testChannel = null;
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('📱 畫面喚醒：重置網路鎖並重啟更新');
+      _isFetchingTelemetry = false;
+      _startTimers(); 
+      
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _fetchRealLocationAndWeather();
+          _fetchTelemetryDataFromSupabase();
+          _fetchBatteries();
+          _setupRealtimeSubscription(); 
+        }
+      });
+      
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      debugPrint('📱 畫面鎖定/背景：暫停更新與中斷殭屍連線');
+      _stopTimers();
+      _psChannel?.unsubscribe();
+      _testChannel?.unsubscribe();
+      _psChannel = null;
+      _testChannel = null;
+    }
   }
-}
 
   @override
   void dispose() {
@@ -381,7 +389,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
           int calculatedCode = _parseCwaWxToCode(wxText);
           bool currentTyphoonWarning = false;
 
-          // 🚨 接入氣象警特報 API (W-C0033-001)
           try {
             final alertUrl = 'https://opendata.cwa.gov.tw/api/v1/rest/datastore/W-C0033-001?Authorization=$cwaApiKey';
             final alertResponse = await http.get(Uri.parse(alertUrl)).timeout(const Duration(seconds: 4));
@@ -510,11 +517,9 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     final String sn = widget.inverterSn;
     if (sn.isEmpty) return;
 
-    // 🎯 關鍵修復 3：移除 await。直接呼叫 unsubscribe 而不等待，防止整個函式卡死
     _psChannel?.unsubscribe();
     _testChannel?.unsubscribe();
 
-    // 🎯 1. 簡化頻道名稱
     _psChannel = Supabase.instance.client.channel('ps_channel_$sn');
     _psChannel!.onPostgresChanges(
       event: PostgresChangeEvent.insert, 
@@ -526,7 +531,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
         if (mounted) setState(() { _updatePsData(payload.newRecord); });
       }
     ).subscribe((status, [error]) {
-      // 🎯 2. 加入狀態監聽，在 VS Code 終端機能清楚看到是 SUBSCRIBED 還是 CLOSED
       debugPrint('📡 InvPs Realtime 狀態: $status');
       if (error != null) debugPrint('⚠️ InvPs Realtime 錯誤: $error');
     });
@@ -693,11 +697,9 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已關閉「惡劣天氣備援模式」'), backgroundColor: Colors.teal));
       }
     } catch (e) {
-      // 🎯 1. 在終端機印出詳細錯誤供工程師除錯
       debugPrint('解除備援模式失敗: $e'); 
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars(); 
-        // 🎯 2. 改用更溫和、安全的通用文字
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('系統連線異常，請檢查網路狀態後再試。'), 
           backgroundColor: Colors.redAccent
@@ -782,7 +784,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     return 0; 
   }
 
-  // 🎯 將氣象局代碼與警報狀態轉換為對應的天氣渲染狀態
   WeatherCondition _getWeatherCondition(int code) {
     if (_isTyphoonWarning) return WeatherCondition.typhoon; 
 
@@ -797,6 +798,68 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     return WeatherCondition.sunny;
   }
 
+  // 🎯 輔助方法：檢查管理員或擁有者權限並開啟「電價方案 / 設備資訊設定」頁面
+  // 🎯 1. 專供點擊「安裝區域」卡片使用：開啟「設備資訊 (DeviceInfoSettingsScreen)」
+  Future<void> _openDeviceInfoPage() async {
+    bool isRootOrOwner = false;
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      try {
+        final data = await Supabase.instance.client
+            .from('devices')
+            .select('user_id')
+            .eq('id', widget.deviceDbId)
+            .maybeSingle();
+        if (data != null) {
+          isRootOrOwner = (data['user_id'] == user.id) ||
+              widget.accountType == '系統管理員(root)';
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DeviceInfoSettingsScreen(
+          deviceDbId: widget.deviceDbId,
+          isRootOrOwner: isRootOrOwner,
+          accountType: widget.accountType,
+        ),
+      ),
+    );
+    _fetchRealLocationAndWeather();
+  }
+
+  // 🎯 2. 專供點擊「計價模式」使用：直接開啟「電價方案 (ElectricityTariffScreen)」頁面
+  Future<void> _openTariffSettingsPage() async {
+    bool isRootOrOwner = false;
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      try {
+        final data = await Supabase.instance.client
+            .from('devices')
+            .select('user_id')
+            .eq('id', widget.deviceDbId)
+            .maybeSingle();
+        if (data != null) {
+          isRootOrOwner = (data['user_id'] == user.id) ||
+              widget.accountType == '系統管理員(root)';
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ElectricityTariffScreen(
+          deviceDbId: widget.deviceDbId,
+          isRootOrOwner: isRootOrOwner,
+        ),
+      ),
+    );
+    _fetchRealLocationAndWeather();
+  }
+
   Widget _buildTariffContent(Map<String, String> details, double maxSaved) {
     final Color seasonColor = details['season'] == '夏月' ? Colors.orange : Colors.blueAccent;
     Color periodColor = Colors.teal;
@@ -809,14 +872,32 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('計價模式', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
-            Text(_rawTariffMode, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-          ],
+        // 🎯 點擊「計價模式」直接開啟 ElectricityTariffScreen (電價方案頁面)
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: _openTariffSettingsPage,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 2.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('計價模式', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_rawTariffMode, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: Colors.teal),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -838,7 +919,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
             )
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -849,7 +930,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
         ),
         const SizedBox(height: 8),
         SizedBox(
-          height: 110,
+          height: 100,
           child: _savingsData.isEmpty
               ? const Center(child: Text('尚無今日收益數據', style: TextStyle(fontSize: 11, color: Colors.black26)))
               : ListView.builder(
@@ -865,11 +946,11 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                     if (period == '尖峰') barColor = Colors.redAccent.shade200;
                     if (period == '半尖峰') barColor = Colors.orangeAccent;
 
-                    double barHeight = (saved / maxSaved) * 50.0;
+                    double barHeight = (saved / maxSaved) * 45.0;
                     if (barHeight < 2 && saved > 0) barHeight = 2;
 
                     return Container(
-                      width: 32,
+                      width: 30,
                       margin: const EdgeInsets.only(right: 6),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
@@ -877,7 +958,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                           Text(saved > 0 ? saved.toStringAsFixed(1) : '', style: const TextStyle(fontSize: 9, color: Colors.black54)),
                           const SizedBox(height: 2),
                           Container(
-                            width: 16,
+                            width: 14,
                             height: barHeight,
                             decoration: BoxDecoration(
                               color: barColor,
@@ -896,6 +977,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     );
   }
 
+  // 🎯 單行緊湊版「今日預估發電收益」卡片 (綁定 _kCardOpacity)
   Widget _buildTariffCard() {
     final details = _getCurrentTariffDetails(_rawTariffMode);
     double maxSaved = 0;
@@ -905,33 +987,39 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     if (maxSaved == 0) maxSaved = 1; 
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24)
+        color: Colors.white.withValues(alpha: _kCardOpacity),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           dense: true,
+          visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
           iconColor: Colors.teal,
           collapsedIconColor: Colors.black38,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-          leading: const Icon(Icons.price_change_outlined, color: Colors.teal, size: 18),
-          title: const Text('今日預估發電收益', style: TextStyle(fontSize: 12, color: Colors.black54)),
-          subtitle: Text(
-            'NT\$ ${_todayTotalSavings.toStringAsFixed(1)}',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal)
+          tilePadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          leading: const Icon(Icons.price_change_outlined, color: Colors.teal, size: 16),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('今日預估發電收益', style: TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.w600)),
+              Text(
+                'NT\$ ${_todayTotalSavings.toStringAsFixed(1)}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
+              ),
+            ],
           ),
           children: [
             const Divider(height: 1, color: Colors.black12),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.4),
-                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
+                color: Colors.white.withValues(alpha: _kCardExpandedOpacity),
+                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)),
               ),
               child: _buildTariffContent(details, maxSaved),
             ),
@@ -941,7 +1029,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     );
   }
 
-  // 🎯 修改：加入 context 參數，以便後續點擊跳轉
   Widget _buildTouSettingsContent(BuildContext context, bool isEffectivelyBackup, bool isSeason, int startM, int endM) {
     Widget buildSlot(String title, Map<String, dynamic>? slot) {
       if (slot == null) return const SizedBox.shrink();
@@ -953,29 +1040,27 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
       Color stateColor = state == 0 ? Colors.black38 : (state == 1 ? Colors.teal : Colors.orange);
 
       return Padding(
-        padding: const EdgeInsets.only(top: 6, bottom: 6),
+        padding: const EdgeInsets.only(top: 4, bottom: 4),
         child: Row(
           children: [
-            Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+            Text(title, style: const TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(color: stateColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-              child: Text(stateStr, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: stateColor)),
+              child: Text(stateStr, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: stateColor)),
             ),
-            const SizedBox(width: 10),
-            Text('$start - $end', style: const TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            Text('$start - $end', style: const TextStyle(fontSize: 11, color: Colors.black87, fontWeight: FontWeight.bold)),
           ],
         ),
       );
     }
 
-    // 🎯 新增：用 InkWell 包裝整個內容，並設定點擊事件跳轉至 TouSettingsScreen
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () async {
-          // 判斷是否為管理員或擁有者 (使用與首頁地圖跳轉相同的邏輯)
           bool isRootOrOwner = false;
           final user = Supabase.instance.client.auth.currentUser;
           if (user != null) {
@@ -1005,7 +1090,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
             ),
           );
           
-          // 🎯 返回時重新讀取資料，確保首頁顯示最新的排程
           _fetchRealLocationAndWeather();
         },
         child: Column(
@@ -1022,7 +1106,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
               Text('夏月排程 ($startM月~$endM月)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange)),
               buildSlot('時段 1', _touSettings!['summerSlot0']),
               buildSlot('時段 2', _touSettings!['summerSlot1']),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               const Text('非夏月排程', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
               buildSlot('時段 1', _touSettings!['winterSlot0']),
               buildSlot('時段 2', _touSettings!['winterSlot1']),
@@ -1037,6 +1121,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     );
   }
 
+  // 🎯 單行緊湊版「時間電價(TOU)排程」卡片 (綁定 _kCardOpacity)
   Widget _buildTouSettingsCard() {
     if (_touSettings == null && !_isStormBackupMode) return const SizedBox.shrink();
 
@@ -1058,44 +1143,152 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     final bool isEffectivelyBackup = _isStormBackupMode || isManualBackup;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.6), 
-        borderRadius: BorderRadius.circular(12), 
-        border: Border.all(color: Colors.white24)
+        color: Colors.white.withValues(alpha: _kCardOpacity), 
+        borderRadius: BorderRadius.circular(10), 
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           dense: true,
+          visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
           iconColor: Colors.teal,
           collapsedIconColor: Colors.black38,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-          leading: const Icon(Icons.schedule_rounded, color: Colors.teal, size: 18),
-          title: const Text('時間電價(TOU)排程', style: TextStyle(fontSize: 12, color: Colors.black54)),
-          subtitle: Text(
-            isEffectivelyBackup 
-                ? '一般運行模式' 
-                : (isSeason ? '夏月/非夏月模式' : '全年共用模式'), 
-            style: TextStyle(
-              fontSize: 12, 
-              fontWeight: FontWeight.bold, 
-              color: isEffectivelyBackup ? Colors.orange.shade700 : Colors.teal
-            )
+          tilePadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          leading: const Icon(Icons.schedule_rounded, color: Colors.teal, size: 16),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('時間電價(TOU)', style: TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.w600)),
+              Text(
+                isEffectivelyBackup 
+                    ? '一般運行' 
+                    : (isSeason ? '夏月/非夏月' : '全年共用'), 
+                style: TextStyle(
+                  fontSize: 11, 
+                  fontWeight: FontWeight.bold, 
+                  color: isEffectivelyBackup ? Colors.orange.shade700 : Colors.teal,
+                ),
+              ),
+            ],
           ),
           children: [
             const Divider(height: 1, color: Colors.black12),
             Container(
               width: double.infinity,
-              // 🎯 將 Padding 移除，交給內部的 _buildTouSettingsContent 處理，確保波紋填滿
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.4),
-                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
+                color: Colors.white.withValues(alpha: _kCardExpandedOpacity),
+                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: _buildTouSettingsContent(context, isEffectivelyBackup, isSeason, startM, endM), // 🎯 傳入 context
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: _buildTouSettingsContent(context, isEffectivelyBackup, isSeason, startM, endM),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🎯 「安裝區域」圓角卡片 (綁定 _kCardOpacity)
+  Widget _buildWebLocationCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: _kCardOpacity),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: _openDeviceInfoPage,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.location_on_rounded, color: (_locationDisplay == '尚未設定') ? Colors.orangeAccent : Colors.teal, size: 14),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _locationDisplay == '尚未設定' ? '設定地址' : _locationDisplay,
+                      style: TextStyle(fontSize: 11, color: (_locationDisplay == '尚未設定') ? Colors.orange.shade700 : Colors.black87, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 🎯 「天氣狀態」圓角卡片 (綁定 _kCardOpacity)
+  Widget _buildWebWeatherCard() {
+    if (_weatherDisplay.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: _kCardOpacity),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(_isTyphoonWarning ? Icons.cyclone_rounded : Icons.cloud_queue_rounded, color: _isTyphoonWarning ? Colors.redAccent : Colors.blueAccent, size: 14),
+          const SizedBox(width: 4),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _weatherDisplay,
+                style: const TextStyle(fontSize: 11, color: Colors.black87, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🎯 網頁版專用：「電池模組列表」卡片 (綁定 _kCardOpacity)
+  Widget _buildBatteryExpansionCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: _kCardOpacity),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          dense: true,
+          visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+          iconColor: Colors.teal,
+          collapsedIconColor: Colors.black38,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          leading: const Icon(Icons.battery_charging_full_rounded, color: Colors.teal, size: 16),
+          title: const Text('電池模組列表', style: TextStyle(fontSize: 12, color: Colors.black87, fontWeight: FontWeight.w600)),
+          children: [
+            const Divider(height: 1, color: Colors.black12),
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: _kCardExpandedOpacity),
+                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)),
+              ),
+              child: _buildSidebarBatteryList(),
             ),
           ],
         ),
@@ -1105,52 +1298,47 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
 
   Widget _buildSidebarBatteryList() {
     if (_isLoadingBatteries) {
-      return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator(color: Colors.teal)));
+      return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(color: Colors.teal)));
     }
     if (_batteries.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(12)),
-        child: const Center(child: Text('目前尚未綁定任何電池模組', style: TextStyle(color: Colors.black38, fontSize: 12)))
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: _kCardExpandedOpacity), borderRadius: BorderRadius.circular(10)),
+        child: const Center(child: Text('目前尚未綁定任何電池模組', style: TextStyle(color: Colors.black38, fontSize: 11)))
       );
     }
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24)
+        color: Colors.white.withValues(alpha: _kCardExpandedOpacity),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: ListView.separated(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         itemCount: _batteries.length,
         separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black12),
         itemBuilder: (context, index) {
           final bat = _batteries[index];
           return ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
             leading: Container(
-              width: 40,
-              height: 40,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 color: Colors.white, 
-                borderRadius: BorderRadius.circular(8), 
+                borderRadius: BorderRadius.circular(6), 
                 border: Border.all(color: Colors.black12), 
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))
-                ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.asset(
-                  'assets/images/bat_icon.png', 
-                  fit: BoxFit.contain, 
-                ),
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset('assets/images/bat_icon.png', fit: BoxFit.contain),
               ),
             ),
-            title: const Text('FT-IFS-B05', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-            subtitle: Text('SN: ${bat['bat_sn']}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+            title: const Text('FT-IFS-B05', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            subtitle: Text('SN: ${bat['bat_sn']}', style: const TextStyle(fontSize: 10, color: Colors.black54)),
           );
         },
       ),
@@ -1161,24 +1349,23 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_isStormBackupMode) return const SizedBox.shrink();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.red.shade200, width: 1.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200, width: 1.2),
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-          const SizedBox(width: 12),
+          const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 22),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('惡劣天氣備援執行中', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13)),
-                const SizedBox(height: 4),
-                Text('系統已暫停您的時間電價(TOU)排程，並盡可能將電池維持在高儲備量狀態', style: TextStyle(color: Colors.red.shade700, fontSize: 11)),
+                const Text('惡劣天氣備援執行中', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                Text('已暫停 TOU 排程並維持高儲備電量', style: TextStyle(color: Colors.red.shade700, fontSize: 10)),
               ],
             ),
           ),
@@ -1186,53 +1373,188 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-              minimumSize: const Size(0, 32),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+              minimumSize: const Size(0, 28),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
               elevation: 0,
             ),
             onPressed: () {
+              // 🎯 統一改為：背景模糊 (sigma: 10) + 黑色半透明視窗 (alpha: 0.6)
               showDialog(
                 context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    title: const Row(
-                      children: [
-                        Icon(Icons.info_outline, color: Colors.teal),
-                        SizedBox(width: 8),
-                        Text('解除備援模式', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                builder: (BuildContext dialogContext) {
+                  return BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: AlertDialog(
+                      backgroundColor: Colors.black.withValues(alpha: 0.6),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.2),
+                          width: 1.5,
+                        ),
+                      ),
+                      title: const Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Colors.tealAccent, size: 22),
+                          SizedBox(width: 8),
+                          Text(
+                            '解除備援模式',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                      content: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 340),
+                        child: const Text(
+                          '確定要解除「惡劣天氣備援模式」嗎？',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.white70,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(dialogContext).pop(), 
+                          child: const Text('取消', style: TextStyle(color: Colors.grey)),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(dialogContext).pop(); 
+                            _restoreTouMode();           
+                          },
+                          child: const Text(
+                            '確定解除',
+                            style: TextStyle(
+                              color: Colors.tealAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                    content: const Text(
-                      '確定要解除「惡劣天氣備援模式」嗎？\n\n系統將自動還原您上一次設定的「時間電價(TOU)排程」。',
-                      style: TextStyle(fontSize: 14, color: Colors.black87, height: 1.5),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(), 
-                        child: const Text('取消', style: TextStyle(color: Colors.black54)),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).pop(); 
-                          _restoreTouMode();           
-                        },
-                        child: const Text('確定解除', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
                   );
                 },
               );
             },
-            child: const Text('解除', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            child: const Text('解除', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
+    );
+  }
+
+  // 🎯 緊湊化手機數據卡片 + 僅在「手機窄版 (!context.isMobileWideLayout)」顯示底部的設定按鈕
+  // (因為「手機寬版」的「設定」已移至左側毛玻璃導覽列「設備列表」的下方！)
+  Widget _buildMobileExtraStatsAndSettings() {
+    final bool isMobileWide = context.isMobileWideLayout;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Expanded(child: _buildHalfMenuCard('今日發電', todaySolar != null ? '${todaySolar!.toStringAsFixed(2)} kWh' : '--', icon: Icons.solar_power_rounded)),
+            const SizedBox(width: 6),
+            Expanded(child: _buildHalfMenuCard('今日用電', todayLoad != null ? '${todayLoad!.toStringAsFixed(2)} kWh' : '--', icon: Icons.home_rounded)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        
+        Builder(
+          builder: (context) {
+            if (_cumulativeSolar == null || _cumulativeSolar == 0.0) {
+              return Row(
+                children: [
+                  Expanded(child: _buildHalfMenuCard('累積減碳', '--', icon: Icons.co2_rounded)),
+                  const SizedBox(width: 6),
+                  Expanded(child: _buildHalfMenuCard('累積植樹', '--', icon: Icons.park_rounded)),
+                ],
+              );
+            }
+            
+            double carbonReduction = _cumulativeSolar! * 0.495;
+            double treeEquivalent = carbonReduction / 12.0;
+
+            String carbonStr;
+            if (carbonReduction >= 1000) {
+              carbonStr = '${(carbonReduction / 1000).toStringAsFixed(1)} t';
+            } else {
+              carbonStr = '${carbonReduction.toStringAsFixed(1)} kg';
+            }
+
+            return Row(
+              children: [
+                Expanded(child: _buildHalfMenuCard('累積減碳', carbonStr, icon: Icons.co2_rounded)),
+                const SizedBox(width: 6),
+                Expanded(child: _buildHalfMenuCard('累積植樹', '${treeEquivalent.toStringAsFixed(1)} 棵', valueColor: Colors.green.shade600, icon: Icons.park_rounded)),
+              ],
+            );
+          }
+        ),
+        const SizedBox(height: 6),
+
+        Row(
+          children: [
+            Expanded(child: _buildSelfConsumptionBarCard()),
+            const SizedBox(width: 6),
+            Expanded(child: _buildSocBarCard()),
+          ],
+        ),
+
+        // 🎯 關鍵優化：在「手機寬版 (isMobileWide)」下隱藏右側面板底部的「設定」，
+        // 改由左側導覽列「設備列表」下方的「設定」子項目統一開啟！
+        if (!isMobileWide) ...[
+          const SizedBox(height: 8),
+          const Divider(color: Colors.black12, height: 1),
+          const SizedBox(height: 4),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    settings: const RouteSettings(name: 'device_settings'),
+                    builder: (context) => SettingsSubMenuScreen(
+                      deviceDbId: widget.deviceDbId,
+                      accountType: widget.accountType,
+                      inverterSn: widget.inverterSn, 
+                    ),
+                  ),
+                );
+                _fetchRealLocationAndWeather();
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Colors.teal,
+                      radius: 15,
+                      child: Icon(Icons.settings_suggest_rounded, color: Colors.white, size: 16),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text('設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
+                    ),
+                    Icon(Icons.arrow_forward_ios_rounded, size: 13, color: Colors.black38),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1243,7 +1565,8 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     const double figmaRatio = figmaWidth / figmaHeight;
     final double statusBarHeight = MediaQuery.of(context).padding.top;
     
-    bool isWideScreen = MediaQuery.of(context).size.width > 800;
+    final bool isWideScreen = context.useWideLayout;
+    final bool isMobileWide = context.isMobileWideLayout;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -1251,14 +1574,12 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
         children: [
           // ─── 🛡️ 第 1 層防護罩：獨立的背景天氣層 ───
           Positioned.fill(
-            child: RepaintBoundary( // 🎯 加入防護罩
+            child: RepaintBoundary(
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 1200), // 🎯 1.2 秒的柔和過場時間
-                switchInCurve: Curves.easeInOutCubic, // 🎯 緩入緩出曲線，讓轉場更自然
+                duration: const Duration(milliseconds: 1200),
+                switchInCurve: Curves.easeInOutCubic,
                 switchOutCurve: Curves.easeInOutCubic,
                 child: RealisticWeatherBg(
-                  // 🎯 加入 ValueKey：這是觸發轉場的靈魂！
-                  // 當 _currentWeatherCode 改變時，Flutter 會知道這是一個「全新的畫面」，進而自動執行淡入淡出
                   key: ValueKey(_currentWeatherCode), 
                   condition: _getWeatherCondition(_currentWeatherCode),
                   child: const SizedBox.shrink(),
@@ -1271,7 +1592,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
           Positioned.fill(
             top: kToolbarHeight + statusBarHeight - 12.0,
             bottom: isWideScreen ? 24.0 : MediaQuery.of(context).size.height * 0.33,
-            child: RepaintBoundary( // 🎯 加入防護罩，這層的 UI 就不會被天氣動畫逼著重繪
+            child: RepaintBoundary(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 0.0),
                 child: Column(
@@ -1279,121 +1600,37 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                     Builder(
                       builder: (context) {
                         final bool isDarkEnv = _isDarkWeather;
-                        // 🎯 這裡控制了文字顏色！
-                        // 如果是深色背景 (isDarkEnv為true)，字體變成 white70；否則為 black87
+                        // 🎯 當夜晚或深色天氣狀態改變時，自動通知外層 InnerDashboardNavigation 將逆變器名稱切換為白色！
+                        if (_lastNotifiedDarkEnv != isDarkEnv) {
+                          _lastNotifiedDarkEnv = isDarkEnv;
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) {
+                              widget.onDarkEnvChanged?.call(isDarkEnv);
+                            }
+                          });
+                        }
+
                         final Color subTextColor = isDarkEnv ? Colors.white70 : Colors.black87;
-                        // 如果是深色背景 (isDarkEnv為true)，強調色變成 orangeAccent；否則為 teal.shade800
                         final Color highlightColor = isDarkEnv ? Colors.orangeAccent : Colors.teal.shade800;
 
                         return Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start, 
                           children: [
                             Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [                         
-                                // 🎯 日期文字
-                                Text(_getDateHeaderString(), style: TextStyle(fontSize: 10, color: subTextColor, fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 2),
-                                // 🎯 最後更新時間
-                                Text('最後更新: $_lastUpdateTime', style: TextStyle(fontSize: 9, color: highlightColor, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end, 
-                              children: [
-                                GestureDetector(
-                                  onTap: () async {
-                                    bool isRootOrOwner = false;
-                                    final user = Supabase.instance.client.auth.currentUser;
-                                    if (user != null) {
-                                      try {
-                                        final data = await Supabase.instance.client
-                                            .from('devices')
-                                            .select('user_id')
-                                            .eq('id', widget.deviceDbId)
-                                            .single();
-                                            
-                                        isRootOrOwner = (data['user_id'] == user.id) || 
-                                                        widget.accountType == '系統管理員(root)';
-                                      } catch (_) {}
-                                    }
-                                    
-                                    if (!context.mounted) return;
-                                    
-                                    await Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => DeviceInfoSettingsScreen(
-                                          deviceDbId: widget.deviceDbId,
-                                          isRootOrOwner: isRootOrOwner,
-                                          accountType: widget.accountType, 
-                                        )
-                                      ),
-                                    );
-                                    
-                                    _fetchRealLocationAndWeather();
-                                  },
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.location_on_rounded, 
-                                        size: 11, 
-                                        color: (_locationDisplay == '尚未設定') ? Colors.orangeAccent : highlightColor
-                                      ),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        _locationDisplay == '尚未設定' ? '點此設定安裝地址' : _locationDisplay,
-                                        style: TextStyle(
-                                          fontSize: 10, 
-                                          color: (_locationDisplay == '尚未設定') ? Colors.orangeAccent : highlightColor, 
-                                          fontWeight: FontWeight.bold,
-                                          decoration: TextDecoration.underline,
-                                          decorationColor: (_locationDisplay == '尚未設定') ? Colors.orangeAccent : highlightColor,
-                                        )
-                                      ),
-                                    ],
-                                  ),
+                                Text(
+                                  _getDateHeaderString(),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 10, color: subTextColor, fontWeight: FontWeight.bold),
                                 ),
-                                if (_weatherDisplay.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  GestureDetector(
-                                    // 🎯 暫時關閉 7 階段天氣測試功能：將 onTap 完整註解
-                                    /*
-                                    onTap: () {
-                                      setState(() {
-                                        if (_currentWeatherCode == 0) {
-                                          _currentWeatherCode = 2; 
-                                          _weatherDisplay = '開發測試：晴時多雲 28~32°C';
-                                        } else if (_currentWeatherCode == 2) {
-                                          _currentWeatherCode = 5; 
-                                          _weatherDisplay = '開發測試：陰天 24~26°C';
-                                        } else if (_currentWeatherCode == 5) {
-                                          _currentWeatherCode = 80; 
-                                          _weatherDisplay = '開發測試：下雨 22~28°C';
-                                        } else if (_currentWeatherCode == 80) {
-                                          _currentWeatherCode = 95; 
-                                          _weatherDisplay = '開發測試：雷雨 20~24°C';
-                                        } else if (_currentWeatherCode == 95) {
-                                          _currentWeatherCode = 99; // 🌪️ 切換至：颱風
-                                          _weatherDisplay = '開發測試：強颱 18~22°C';
-                                        } else if (_currentWeatherCode == 99) {
-                                          _currentWeatherCode = 23; // ❄️ 切換至：下雪
-                                          _weatherDisplay = '開發測試：下雪 -2~3°C';
-                                        } else {
-                                          _currentWeatherCode = 0; 
-                                          _weatherDisplay = '開發測試：晴朗 30~35°C';
-                                        }
-                                      });
-                                    },
-                                    */
-                                    child: Text(
-                                      _weatherDisplay,
-                                      style: TextStyle(fontSize: 9, color: subTextColor, fontWeight: FontWeight.w600)
-                                    ),
-                                  ),
-                                ],
+                                const SizedBox(height: 2),
+                                Text(
+                                  '最後更新: $_lastUpdateTime',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 9, color: highlightColor, fontWeight: FontWeight.w600),
+                                ),
                               ],
                             ),
                           ],
@@ -1423,7 +1660,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                                   child: Stack(
                                     clipBehavior: Clip.none,
                                     children: [
-                                      // 🎯 3D 建築底部的柔和懸浮陰影
                                       Positioned(
                                         left: finalWidth * 0.1,
                                         right: finalWidth * 0.1,
@@ -1457,12 +1693,12 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                                       ),
                                       Positioned(
                                         left: getX(218) + (21.0 / figmaWidth) * finalWidth, 
-                                        top: getY(-30), // 🎯 向上提升顯示空間
+                                        top: getY(-30),
                                         child: buildFixedDashboardItem(title: '電網', value: _formatPower(gridPower)),
                                       ),
                                       Positioned(
                                         left: getX(1457) + (21.0 / figmaWidth) * finalWidth, 
-                                        top: getY(-30), // 🎯 向上提升顯示空間
+                                        top: getY(-30),
                                         child: buildFixedDashboardItem(title: '太陽能', value: _formatPower(pvPower)),
                                       ),
                                       Positioned(
@@ -1490,15 +1726,15 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
             ),
           ),
           
-          // ─── 🛡️ 第 3 層防護罩：側邊欄 (寬螢幕專用) ───
+          // ─── 🛡️ 第 3 層防護罩：右側水平滑動資訊面板 (網頁版 & 手機寬版共用，綁定 _kPanelOpacity) ───
           if (isWideScreen)
             AnimatedPositioned(
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeInOut,
               top: 0,
               bottom: 0,
-              right: _isTouPanelVisible ? 0 : -320, 
-              child: RepaintBoundary( // 🎯 加入防護罩
+              right: _isTouPanelVisible ? 0 : -300, 
+              child: RepaintBoundary(
                 child: Center( 
                   child: Row(
                     mainAxisSize: MainAxisSize.min, 
@@ -1511,11 +1747,11 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                           });
                         },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.70),
+                            color: Colors.white.withValues(alpha: _kCardOpacity),
                             borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                            border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
                             boxShadow: [
                               BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(-2, 2))
                             ]
@@ -1523,101 +1759,83 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                           child: Icon(
                             _isTouPanelVisible ? Icons.arrow_forward_ios_rounded : Icons.analytics_rounded, 
                             color: Colors.teal, 
-                            size: 22
+                            size: 20
                           ),
                         ),
                       ),
                       
                       SizedBox(
-                        width: 320, 
+                        width: 300, 
                         child: ClipRRect(
                           borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
                           child: BackdropFilter(
                             filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                             child: Container(
                               constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.5),
+                                color: Colors.white.withValues(alpha: _kPanelOpacity),
                                 borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                                border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
                                 boxShadow: [
                                   BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))
                                 ]
                               ),
-                              child: SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.price_change_outlined, color: Colors.teal, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Expanded(child: Text('今日預估發電收益', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87))),
-                                        InkWell(
-                                          onTap: () => setState(() => _isTouPanelVisible = false),
-                                          child: const Icon(Icons.close_rounded, size: 18, color: Colors.black38),
-                                        )
+                              child: MediaQuery.removePadding(
+                                context: context,
+                                removeRight: true,
+                                removeLeft: true,
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (!isMobileWide) ...[
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text(
+                                              '系統資訊',
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                            InkWell(
+                                              onTap: () => setState(() => _isTouPanelVisible = false),
+                                              child: const Icon(
+                                                Icons.close_rounded,
+                                                size: 18,
+                                                color: Colors.black54,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
                                       ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Builder(
-                                      builder: (context) {
-                                        final details = _getCurrentTariffDetails(_rawTariffMode);
-                                        double maxSaved = 0;
-                                        for (var item in _savingsData) {
-                                          if (item['saved'] > maxSaved) maxSaved = item['saved'];
-                                        }
-                                        if (maxSaved == 0) maxSaved = 1; 
-                                        return _buildTariffContent(details, maxSaved);
-                                      }
-                                    ),
-                                    
-                                    if (_touSettings != null || _isStormBackupMode) ...[
-                                      const Divider(height: 32, color: Colors.black12),
-                                      const Row(
+
+                                      if (isMobileWide) _buildStormBackupBanner(),
+
+                                      Row(
                                         children: [
-                                          Icon(Icons.schedule_rounded, color: Colors.teal, size: 18),
-                                          SizedBox(width: 8),
-                                          Expanded(child: Text('時間電價(TOU)排程', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87))),
+                                          Expanded(child: _buildWebLocationCard()),
+                                          if (_weatherDisplay.isNotEmpty) ...[
+                                            const SizedBox(width: 6),
+                                            Expanded(child: _buildWebWeatherCard()),
+                                          ],
                                         ],
                                       ),
-                                      const SizedBox(height: 12),
-                                      Builder(
-                                        builder: (context) {
-                                          final bool isSeason = _touSettings?['isSeasonModeEnabled'] ?? false;
-                                          final int startM = _touSettings?['summerStartMonth'] ?? 6;
-                                          final int endM = _touSettings?['summerEndMonth'] ?? 9;
+                                      const SizedBox(height: 6),
 
-                                          bool isManualBackup = false;
-                                          if (_touSettings != null && !isSeason) {
-                                            final slot0 = _touSettings!['winterSlot0'];
-                                            final slot1 = _touSettings!['winterSlot1'];
-                                            if (slot0 != null && slot1 != null &&
-                                                slot0['state'] == 1 && slot0['start'] == '00:00' && slot0['end'] == '00:00' &&
-                                                slot1['state'] == 1 && slot1['start'] == '00:00' && slot1['end'] == '00:00') {
-                                              isManualBackup = true;
-                                            }
-                                          }
-                                          final bool isEffectivelyBackup = _isStormBackupMode || isManualBackup;
-                                          // 🎯 補上第一個參數 context
-                                          return _buildTouSettingsContent(context, isEffectivelyBackup, isSeason, startM, endM);
-                                        }
-                                      ),
+                                      _buildTariffCard(),
+                                      _buildTouSettingsCard(),
+                                      
+                                      if (!isMobileWide) _buildBatteryExpansionCard(),
+
+                                      if (isMobileWide) _buildMobileExtraStatsAndSettings(),
                                     ],
-                                    
-                                    const Divider(height: 32, color: Colors.black12),
-                                    const Row(
-                                      children: [
-                                        Icon(Icons.battery_charging_full_rounded, color: Colors.teal, size: 18),
-                                        SizedBox(width: 8),
-                                        Expanded(child: Text('電池模組列表', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87))),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 12),
-                                    _buildSidebarBatteryList(),
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -1630,10 +1848,10 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
               ),
             ),
           
-          // ─── 🛡️ 第 4 層防護罩：底部滑動選單 (手機板專用) ───
+          // ─── 🛡️ 第 4 層防護罩：底部滑動選單 (手機一般窄版專用) ───
           if (!isWideScreen)
             Positioned.fill(
-              child: RepaintBoundary( // 🎯 加入防護罩
+              child: RepaintBoundary(
                 child: DraggableScrollableSheet(
                   initialChildSize: 0.33,
                   minChildSize: 0.33, 
@@ -1646,92 +1864,38 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
                         filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                         child: Container(
                           color: Colors.teal.withValues(alpha: 0.08),
-                          child: ListView(
-                            controller: scrollController,
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            children: [
-                              Center(child: Container(width: 40, height: 4.5, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(2)))),
-                              const SizedBox(height: 20),
-                              
-                              _buildStormBackupBanner(),
-                              _buildTariffCard(),
-                              _buildTouSettingsCard(),
-                              
-                              Row(
-                                children: [
-                                  Expanded(child: _buildHalfMenuCard('今日發電量', todaySolar != null ? '${todaySolar!.toStringAsFixed(2)} kWh' : '--', icon: Icons.solar_power_rounded)),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: _buildHalfMenuCard('今日用電量', todayLoad != null ? '${todayLoad!.toStringAsFixed(2)} kWh' : '--', icon: Icons.home_rounded)),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              
-                              Builder(
-                                builder: (context) {
-                                  if (_cumulativeSolar == null || _cumulativeSolar == 0.0) {
-                                    return Row(
-                                      children: [
-                                        Expanded(child: _buildHalfMenuCard('累積減碳量', '--', icon: Icons.co2_rounded)),
-                                        const SizedBox(width: 10),
-                                        Expanded(child: _buildHalfMenuCard('累積植樹棵數', '--', icon: Icons.park_rounded)),
-                                      ],
-                                    );
-                                  }
-                                  
-                                  double carbonReduction = _cumulativeSolar! * 0.495;
-                                  double treeEquivalent = carbonReduction / 12.0;
+                          child: MediaQuery.removePadding(
+                            context: context,
+                            removeTop: true,
+                            removeLeft: true,
+                            removeRight: true,
+                            child: ListView(
+                              controller: scrollController,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              children: [
+                                Center(child: Container(width: 40, height: 4.5, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(2)))),
+                                const SizedBox(height: 14),
+                                
+                                _buildStormBackupBanner(),
 
-                                  String carbonStr;
-                                  if (carbonReduction >= 1000) {
-                                    carbonStr = '${(carbonReduction / 1000).toStringAsFixed(1)} t';
-                                  } else {
-                                    carbonStr = '${carbonReduction.toStringAsFixed(1)} kg';
-                                  }
-
-                                  return Row(
-                                    children: [
-                                      Expanded(child: _buildHalfMenuCard('累積減碳', carbonStr, icon: Icons.co2_rounded)),
-                                      const SizedBox(width: 10),
-                                      Expanded(child: _buildHalfMenuCard('累積植樹', '${treeEquivalent.toStringAsFixed(1)} 棵', valueColor: Colors.green.shade600, icon: Icons.park_rounded)),
+                                Row(
+                                  children: [
+                                    Expanded(child: _buildWebLocationCard()),
+                                    if (_weatherDisplay.isNotEmpty) ...[
+                                      const SizedBox(width: 6),
+                                      Expanded(child: _buildWebWeatherCard()),
                                     ],
-                                  );
-                                }
-                              ),
-                              const SizedBox(height: 10),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
 
-                              Row(
-                                children: [
-                                  Expanded(child: _buildSelfConsumptionBarCard()),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: _buildSocBarCard()),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              
-                              const Divider(color: Colors.black12, height: 1),
-                              const SizedBox(height: 10),
-                              
-                              ListTile(
-                                dense: true,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                tileColor: Colors.white.withValues(alpha: 0.5),
-                                leading: const CircleAvatar(backgroundColor: Colors.teal, radius: 16, child: Icon(Icons.settings_suggest_rounded, color: Colors.white, size: 16)),
-                                title: const Text('設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87)),
-                                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.black38),
-                                onTap: () async {
-                                  await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (context) => SettingsSubMenuScreen(
-                                      deviceDbId: widget.deviceDbId,
-                                      accountType: widget.accountType,
-                                      inverterSn: widget.inverterSn, 
-                                    )),
-                                  );
-                                  _fetchRealLocationAndWeather();
-                                },
-                              ),
-                              const SizedBox(height: 30),
-                            ],
+                                _buildTariffCard(),
+                                _buildTouSettingsCard(),
+                                
+                                _buildMobileExtraStatsAndSettings(),
+                                const SizedBox(height: 30),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -1870,64 +2034,81 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     );
   }
 
+  // 🎯 緊湊版四宮格數據卡 (綁定 _kCardOpacity)
   Widget _buildHalfMenuCard(String title, String value, {Color valueColor = Colors.teal, IconData? icon}) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white24)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: _kCardOpacity),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 16, color: Colors.teal),
+                Icon(icon, size: 13, color: Colors.teal),
                 const SizedBox(width: 4),
               ],
-              Expanded(child: Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54), overflow: TextOverflow.ellipsis)),
+              Expanded(
+                child: Text(title, style: const TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: valueColor)),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: valueColor)),
+          ),
         ],
       ),
     );
   }
 
+  // 🎯 緊湊版「自我供電」進度條卡 (綁定 _kCardOpacity)
   Widget _buildSelfConsumptionBarCard() {
     double load = todayLoad ?? 0.0;
     double grid = todayGrid ?? 0.0;
     double ratio = 0.0;
     if (load > 0) ratio = ((1 - (grid / load)) * 100).clamp(0.0, 100.0);
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white24)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: _kCardOpacity),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('自我供電', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.normal)),
-          const SizedBox(height: 12),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: load > 0 ? ratio / 100 : 0.0,
-                    minHeight: 12,
-                    backgroundColor: Colors.black12,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text('${ratio.toStringAsFixed(0)} %', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+              const Text('自我供電', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w500)),
+              Text('${ratio.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
             ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: load > 0 ? ratio / 100 : 0.0,
+              minHeight: 6,
+              backgroundColor: Colors.black12,
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+            ),
           ),
         ],
       ),
     );
   }
 
+  // 🎯 緊湊版「電池電量」進度條卡 (綁定 _kCardOpacity)
   Widget _buildSocBarCard() {
     double ratio = (batterySoc ?? 0).toDouble();
     
@@ -1941,44 +2122,44 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     bool isCharging = batteryPowerDir == 1;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.6), 
-        borderRadius: BorderRadius.circular(12), 
-        border: Border.all(color: Colors.white24)
+        color: Colors.white.withValues(alpha: _kCardOpacity), 
+        borderRadius: BorderRadius.circular(10), 
+        border: Border.all(color: Colors.white.withValues(alpha: _kCardBorderOpacity)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('電池電量', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.normal)),
-              if (isCharging) ...[
-                const SizedBox(width: 4),
-                const Icon(Icons.bolt_rounded, size: 14, color: Colors.orangeAccent),
-              ]
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('電池電量', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w500)),
+                  if (isCharging) ...[
+                    const SizedBox(width: 2),
+                    const Icon(Icons.bolt_rounded, size: 12, color: Colors.orangeAccent),
+                  ]
+                ],
+              ),
+              Text(
+                batterySoc != null ? '${ratio.toStringAsFixed(0)}%' : '--%', 
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: batterySoc != null ? ratio / 100 : 0.0,
-                    minHeight: 12,
-                    backgroundColor: Colors.black12,
-                    valueColor: AlwaysStoppedAnimation<Color>(barColor),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                batterySoc != null ? '${ratio.toStringAsFixed(0)} %' : '-- %', 
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)
-              ),
-            ],
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: batterySoc != null ? ratio / 100 : 0.0,
+              minHeight: 6,
+              backgroundColor: Colors.black12,
+              valueColor: AlwaysStoppedAnimation<Color>(barColor),
+            ),
           ),
         ],
       ),
